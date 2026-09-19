@@ -125,3 +125,17 @@ SENSOR_RANGES.update({
     "water_level":     (0.0, 100.0),    # % of full scale
     "rainfall":        (0.0, 100.0),    # % of full scale
 })
+
+
+# ---- Pump backend ------------------------------------------------------
+# "esp"  : relay lives on the ESP32 (KS0567 io25), commanded over serial.
+#          The board runs its own watchdog, so a lost cable stops the pump.
+# "gpio" : relay wired straight to the Pi's own pins (PUMP_PINS above).
+PUMP_BACKEND = os.getenv("PUMP_BACKEND", "esp")
+
+ESP_RELAY_PIN = int(os.getenv("ESP_RELAY_PIN", "25"))   # KS0567 relay pin
+
+# How often the Pi re-sends "still on" while irrigating. Must be well
+# under the board's COMMAND_TIMEOUT_MS (5s) or the watchdog will cut in
+# during normal operation.
+ESP_KEEPALIVE_S = float(os.getenv("ESP_KEEPALIVE_S", "1.0"))
