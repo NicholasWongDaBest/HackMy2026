@@ -37,12 +37,14 @@ def push_batch() -> int:
         with database.central() as cconn:
             ccur = cconn.cursor()
             ccur.executemany(
-                "INSERT INTO sensor_data"
-                " (sensor_position, sensor_value, created_at, source_node)"
-                " VALUES (%s, %s, %s, %s)",
+                # Central has no sensor_type column, so the measurand is
+                # folded into sensor_position: "zone-1/moisture".
+                f"INSERT INTO {config.CENTRAL_TABLE}"
+                " (sensor_position, sensor_value, created_at)"
+                " VALUES (%s, %s, %s)",
                 [
-                    (r["sensor_position"], r["sensor_value"], r["created_at"],
-                     config.TEAM_NAME)
+                    (f"{r['sensor_position']}/{r['sensor_type']}",
+                     r["sensor_value"], r["created_at"])
                     for r in rows
                 ],
             )
