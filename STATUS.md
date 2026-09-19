@@ -1,3 +1,9 @@
+# Historical Foundation snapshot
+
+> This file is preserved as the 2026-09-19 12:02 snapshot. It is no longer the
+> live tracker. Use [`READ.md`](READ.md) for the canonical status of all phases,
+> current evidence, blockers, tests, and next actions.
+
 # Foundation status board
 
 Last updated: Sat 19 Sep, 12:02
