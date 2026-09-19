@@ -30,6 +30,8 @@ def dashboard():
     readings = database.recent_readings(20)
     total_rejected, rejections = database.rejection_summary(10)
     pending, last_sync = database.sync_status()
+    link = database.central_link_status()
+    challenge = database.latest_challenge("challenge3")
     return render_template(
         "dashboard.html",
         team=config.TEAM_NAME,
@@ -39,6 +41,8 @@ def dashboard():
         rejections=rejections,
         pending=pending,
         last_sync=last_sync,
+        link=link,
+        challenge=challenge,
         live=database.latest_per_sensor(),
         status=ctl.status(),
         decisions=database.recent_decisions(10),
@@ -76,6 +80,8 @@ def api_status():
         "rejected_total": total_rejected,
         "recent_rejections": rejections,
         "last_sync": last_sync,
+        "central_link": database.central_link_status(),
+        "challenge3": database.latest_challenge("challenge3"),
         "control": ctl.status(),
     })
 

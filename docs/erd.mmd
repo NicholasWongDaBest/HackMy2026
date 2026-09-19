@@ -31,9 +31,17 @@ erDiagram
         varchar_255  detail
         timestamp    ran_at
     }
+    CHALLENGE_EVENTS {
+        int          id PK
+        varchar_32   challenge "challenge3"
+        varchar_64   event_type "start_challenge | ack | ..."
+        varchar_500  message
+        varchar_512  raw_excerpt
+        timestamp    received_at
+    }
     CENTRAL_SENSOR_DATA {
         int           id PK
-        varchar_255   sensor_position
+        varchar_255   sensor_position "includes #L{local_id} for idempotency"
         decimal_10_2  sensor_value
         timestamp     created_at
         varchar_64    source_node "team identifier"
@@ -41,3 +49,4 @@ erDiagram
 
     SENSOR_DATA ||--o{ SYNC_LOG : "batched by"
     SENSOR_DATA ||--o{ CENTRAL_SENSOR_DATA : "replicated to"
+    CHALLENGE_EVENTS ||--|| SENSOR_DATA : "edge mode buffers"

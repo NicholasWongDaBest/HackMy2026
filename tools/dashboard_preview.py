@@ -125,6 +125,21 @@ def page_context() -> dict:
         "selfcare": None,
         "rejections": [],
         "decisions": decisions,
+        "link": {
+            "reachable": False,
+            "pending": len(live),
+            "last_status": "error",
+            "last_detail": "local preview — central not connected",
+            "last_at": stamp,
+            "mode": "edge_offline",
+        },
+        "challenge": {
+            "challenge": "challenge3",
+            "event_type": "start_challenge",
+            "message": "Please start Challenge 3",
+            "received_at": stamp,
+            "active": True,
+        },
     }
 
 

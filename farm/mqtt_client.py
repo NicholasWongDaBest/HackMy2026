@@ -1,5 +1,9 @@
-"""MQTT client: subscribes to the three topics, validates everything,
+"""MQTT client: subscribes to the topics, validates everything,
 and publishes the self-verification signal to central.
+
+Also handles Alien Attack (Challenge 3): when judges publish
+start_challenge on TOPIC_CHALLENGE3, we ACK, enter edge mode, and keep
+the local farm running. Connectivity loss is expected; sync catches up.
 
 Run:  python3 -m farm.mqtt_client
 """
@@ -20,15 +24,33 @@ def _client_id() -> str:
     return f"{config.TEAM_NAME}-pi-{int(time.time())}"
 
 
+def _all_topics():
+    return (
+        config.TOPIC_BROADCAST,
+        config.TOPIC_TEST,
+        config.TOPIC_VERIFY,
+        config.TOPIC_CHALLENGE3,
+    )
+
+
 def on_connect(client, userdata, flags, rc):
     if rc != 0:
         log.error("connect failed rc=%s", rc)
         return
     log.info("connected to %s:%s", config.MQTT_HOST, config.MQTT_PORT)
-    for topic in (config.TOPIC_BROADCAST, config.TOPIC_TEST, config.TOPIC_VERIFY):
+    for topic in _all_topics():
         client.subscribe(topic, qos=1)
         log.info("subscribed %s", topic)
     publish_verify(client, reason="startup")
+
+
+def on_disconnect(client, userdata, rc):
+    # During Alien Attack WiFi is cut on purpose. Keep running locally;
+    # paho will reconnect when the link returns.
+    if rc != 0:
+        log.warning("mqtt disconnected unexpectedly rc=%s (edge mode continues)", rc)
+    else:
+        log.info("mqtt disconnected")
 
 
 def on_message(client, userdata, msg):
@@ -42,6 +64,8 @@ def on_message(client, userdata, msg):
             handle_test(client, raw)
         elif msg.topic == config.TOPIC_VERIFY:
             log.info("verify echo: %s", raw[:120])
+        elif msg.topic == config.TOPIC_CHALLENGE3:
+            handle_challenge3(client, raw)
         else:
             database.record_rejection(msg.topic, "unexpected topic", raw)
     except validation.Rejected as exc:
@@ -78,14 +102,53 @@ def handle_test(client, raw: bytes) -> None:
     )
 
 
+def handle_challenge3(client, raw: bytes) -> None:
+    """Alien Attack trigger. Judges publish start_challenge, then block WiFi.
+
+    We ACK immediately, record the event locally, and leave irrigation /
+    logging / dashboard alone -- they never needed the network.
+    """
+    parsed = validation.parse_challenge3_payload(raw)
+    event_type = parsed["type"]
+    message = parsed["message"]
+
+    database.record_challenge_event(
+        challenge="challenge3",
+        event_type=event_type,
+        message=message,
+        raw=raw,
+    )
+
+    if event_type.lower() in ("start_challenge", "start", "begin"):
+        log.warning(
+            "ALIEN ATTACK start_challenge received -- edge mode. "
+            "Sensors, irrigation, and local logging continue offline."
+        )
+    else:
+        log.info("challenge3 event type=%s message=%s", event_type, message[:80])
+
+    ack = {
+        "team": config.TEAM_NAME,
+        "challenge": "challenge3",
+        "ack": True,
+        "type": event_type,
+        "edge_mode": True,
+        "node": socket.gethostname(),
+        "ts": time.time(),
+    }
+    client.publish(config.TOPIC_CHALLENGE3, json.dumps(ack), qos=1)
+    publish_verify(client, reason="challenge3_ack")
+
+
 def publish_verify(client, reason: str = "heartbeat") -> None:
     """Self-verification signal to central. Includes live health figures
     so 'verified' means the system is actually working, not just alive."""
     try:
         pending, _ = database.sync_status()
         total_rejected, _ = database.rejection_summary(limit=1)
+        challenge = database.latest_challenge("challenge3")
     except Exception:
-        pending, total_rejected = -1, -1
+        pending, total_rejected, challenge = -1, -1, None
 
     payload = {
         "team": config.TEAM_NAME,
@@ -94,6 +157,7 @@ def publish_verify(client, reason: str = "heartbeat") -> None:
         "reason": reason,
         "pending_sync_rows": pending,
         "rejected_messages": total_rejected,
+        "challenge3_active": bool(challenge and challenge.get("active")),
         "timestamp": time.time(),
     }
     client.publish(config.TOPIC_VERIFY, json.dumps(payload), qos=1)
@@ -103,7 +167,9 @@ def publish_verify(client, reason: str = "heartbeat") -> None:
 def build_client() -> mqtt.Client:
     client = mqtt.Client(client_id=_client_id(), clean_session=True)
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
+    # Aggressive reconnect so catch-up starts as soon as WiFi returns.
     client.reconnect_delay_set(min_delay=1, max_delay=30)
     return client
 

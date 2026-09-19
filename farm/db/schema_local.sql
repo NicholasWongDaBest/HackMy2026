@@ -50,6 +50,17 @@ CREATE TABLE IF NOT EXISTS sync_log (
     ran_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Alien Attack (Challenge 3): MQTT start trigger + edge-mode lifecycle.
+CREATE TABLE IF NOT EXISTS challenge_events (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    challenge   VARCHAR(32)  NOT NULL,   -- 'challenge3'
+    event_type  VARCHAR(64)  NOT NULL,   -- 'start_challenge' | 'ack' | ...
+    message     VARCHAR(500) NULL,
+    raw_excerpt VARCHAR(512) NOT NULL,
+    received_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_challenge_at (challenge, received_at)
+);
+
 -- Every automation decision, with the numbers it was made on. This is
 -- the table that answers "why did your pump fire?" -- the brief fails
 -- teams who cannot explain that.

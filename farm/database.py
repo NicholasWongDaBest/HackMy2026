@@ -6,16 +6,20 @@ judge has to look to confirm there is no injection surface.
 import contextlib
 import logging
 
-import mysql.connector
-
 from . import config
 
 log = logging.getLogger(__name__)
 
 
+def _mysql():
+    import mysql.connector
+    return mysql.connector
+
+
 @contextlib.contextmanager
 def connect(cfg):
-    conn = mysql.connector.connect(**cfg)
+    mysql = _mysql()
+    conn = mysql.connect(**cfg)
     try:
         yield conn
     finally:
@@ -212,3 +216,112 @@ def latest_per_sensor():
             " ORDER BY s.sensor_type"
         )
         return cur.fetchall()
+
+
+# ---------------------------------------------------------------------
+# Challenge 3 / Alien Attack edge state
+# ---------------------------------------------------------------------
+def ensure_challenge_table() -> None:
+    """Create challenge_events if an older Pi DB was set up before C3."""
+    with local() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS challenge_events (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                challenge   VARCHAR(32)  NOT NULL,
+                event_type  VARCHAR(64)  NOT NULL,
+                message     VARCHAR(500) NULL,
+                raw_excerpt VARCHAR(512) NOT NULL,
+                received_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_challenge_at (challenge, received_at)
+            )
+            """
+        )
+        conn.commit()
+
+
+def record_challenge_event(
+    challenge: str, event_type: str, message: str, raw: bytes
+) -> None:
+    ensure_challenge_table()
+    excerpt = raw[:512].decode("utf-8", errors="replace")
+    with local() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO challenge_events"
+            " (challenge, event_type, message, raw_excerpt)"
+            " VALUES (%s, %s, %s, %s)",
+            (challenge[:32], event_type[:64], (message or "")[:500], excerpt),
+        )
+        conn.commit()
+
+
+def mark_challenge_active(challenge: str, message: str) -> None:
+    """Record a synthetic 'active' marker the dashboard can read."""
+    ensure_challenge_table()
+    with local() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO challenge_events"
+            " (challenge, event_type, message, raw_excerpt)"
+            " VALUES (%s, %s, %s, %s)",
+            (challenge[:32], "active", (message or "")[:500], "edge_mode"),
+        )
+        conn.commit()
+
+
+def latest_challenge(challenge: str = "challenge3"):
+    ensure_challenge_table()
+    with local() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT challenge, event_type, message, received_at FROM challenge_events"
+            " WHERE challenge = %s ORDER BY id DESC LIMIT 1",
+            (challenge,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        row["active"] = row["event_type"] in (
+            "start_challenge", "start", "begin", "active",
+        )
+        return row
+
+
+def central_link_status():
+    """Infer whether central is reachable from the last sync attempt.
+
+    The sync worker writes 'ok' or 'error' every cycle. Pending rows with a
+    recent error means we are buffering offline -- exactly Alien Attack.
+    """
+    pending, last = sync_status()
+    if last is None:
+        return {
+            "reachable": None,
+            "pending": pending,
+            "last_status": None,
+            "last_detail": None,
+            "last_at": None,
+            "mode": "unknown",
+        }
+    ok = last["status"] == "ok"
+    return {
+        "reachable": ok,
+        "pending": pending,
+        "last_status": last["status"],
+        "last_detail": last.get("detail"),
+        "last_at": last.get("ran_at"),
+        "mode": "online" if ok and pending == 0 else (
+            "catching_up" if ok and pending else "edge_offline"
+        ),
+    }
+
+
+def central_key_for_row(row: dict) -> str:
+    """Stable idempotency key embedded in central.sensor_position.
+
+    Retries after a crash between central INSERT and local synced=1 must
+    not create duplicates. Local id makes each reading unique forever.
+    """
+    return f"{row['sensor_position']}/{row['sensor_type']}#L{row['id']}"

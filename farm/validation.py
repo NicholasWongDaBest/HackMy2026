@@ -240,6 +240,56 @@ def _is_utf8(raw: bytes) -> bool:
 
 
 # ---------------------------------------------------------------------
+# Challenge 3 trigger
+# ---------------------------------------------------------------------
+def parse_challenge3_payload(raw: bytes) -> dict:
+    """Parse the Alien Attack start message.
+
+    The brief shows a non-JSON shape:
+        {type:start_challenge;message:"Please start Challenge 3"}
+    We also accept real JSON so a judge with a normal publisher still works.
+    """
+    check_size(raw)
+    text = raw.decode("utf-8").strip()
+    if not text:
+        raise Rejected("empty challenge payload")
+
+    if text.startswith("{") and '"type"' in text:
+        data = parse_json(raw)
+        event_type = data.get("type")
+        message = data.get("message", "")
+        if not isinstance(event_type, str) or not event_type.strip():
+            raise Rejected("challenge payload missing type")
+        if message is not None and not isinstance(message, str):
+            raise Rejected("challenge message must be text")
+        return {
+            "type": sanitize_text(event_type, max_chars=64),
+            "message": sanitize_text(message, max_chars=500) if message else "",
+        }
+
+    # Brief format: {type:start_challenge;message:"..."}
+    inner = text
+    if inner.startswith("{") and inner.endswith("}"):
+        inner = inner[1:-1]
+    parts = {}
+    for chunk in inner.split(";"):
+        chunk = chunk.strip()
+        if not chunk or ":" not in chunk:
+            continue
+        key, value = chunk.split(":", 1)
+        parts[key.strip().lower()] = value.strip().strip('"').strip("'")
+
+    event_type = parts.get("type")
+    if not event_type:
+        raise Rejected("challenge payload missing type")
+    message = parts.get("message", "")
+    return {
+        "type": sanitize_text(event_type, max_chars=64),
+        "message": sanitize_text(message, max_chars=500) if message else "",
+    }
+
+
+# ---------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------
 def validate_broadcast(raw: bytes) -> dict:

@@ -15,3 +15,7 @@ mysql -h "$CENTRAL" -u hGroup10 -pteamGroup10 hackathonGroup10 \
   -e "SHOW TABLES;" 2>&1 | head -30
 echo; echo "=== listening on broadcast for 10s ==="
 timeout 10 mosquitto_sub -h "$CENTRAL" -p 1883 -t 'hackathon/broadcast' -v || true
+echo; echo "=== Challenge3 topic (subscribe 5s) ==="
+timeout 5 mosquitto_sub -h "$CENTRAL" -p 1883 \
+  -t "hackathon/${TEAM_NAME:-hGroup10}/Challenge3" -v || true
+echo "(publish with: python3 tools/challenge3_trigger.py)"

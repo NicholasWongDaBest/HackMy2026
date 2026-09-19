@@ -20,7 +20,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font: 15px/1.55 "DM Sans", system-ui, sans-serif;
+  font: 15px/1.55 "DM Sans", "Avenir Next", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 button, input { font: inherit; }
@@ -52,9 +52,11 @@ svg { display: block; }
 .navlinks a:hover::after { right: 0; }
 .system-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #cce2d5; border-radius: 999px; color: #1e6746; background: #f1faf5; font-size: 12px; font-weight: 700; }
 .system-chip.danger { color: #9a4038; background: #fff4f2; border-color: #efc8c3; }
+.system-chip.warn { color: #8a6414; background: #fff8e8; border-color: #efd9a3; }
 .pulse-dot, .live-dot, .state-dot { width: 8px; height: 8px; border-radius: 50%; background: #36a86e; box-shadow: 0 0 0 4px rgba(54,168,110,.12); }
 .system-chip.healthy .pulse-dot { animation: pulse 2s infinite; }
 .system-chip.danger .pulse-dot, .bad-dot { background: var(--red); box-shadow: 0 0 0 4px rgba(200,87,75,.12); }
+.system-chip.warn .pulse-dot { background: var(--amber); box-shadow: 0 0 0 4px rgba(227,168,43,.13); animation: pulse 1.4s infinite; }
 .warn-dot { background: var(--amber); box-shadow: 0 0 0 4px rgba(227,168,43,.13); }
 @keyframes pulse { 50% { box-shadow: 0 0 0 7px rgba(54,168,110,0); } }
 
@@ -91,7 +93,7 @@ main { overflow: hidden; }
 .hero-metrics strong { margin-top: 3px; font: 700 21px Manrope, sans-serif; }
 .good-text { color: var(--lime); }
 
-.status-ribbon { width: min(1320px, calc(100% - 48px)); margin: 30px auto 0; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 9px 30px rgba(24,62,48,.05); }
+.status-ribbon { width: min(1320px, calc(100% - 48px)); margin: 30px auto 0; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 9px 30px rgba(24,62,48,.05); }
 .status-item { min-width: 0; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; padding: 19px 24px; }
 .status-item + .status-item { border-left: 1px solid var(--line); }
 .status-icon { width: 38px; height: 38px; display: grid; place-items: center; color: var(--leaf); border-radius: 11px; background: #eff7f2; }
@@ -111,6 +113,9 @@ main { overflow: hidden; }
 .alert-card strong, .alert-card small { display: block; }
 .alert-card p { margin: 2px 0; color: #8f3e36; }
 .alert-card small { color: var(--ink-soft); }
+.alert-card.edge-card { border-color: #efd9a3; background: #fff9eb; }
+.alert-card.edge-card .alert-symbol { background: #c4921a; }
+.alert-card.edge-card p { color: #7a5a12; }
 
 .sensor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .sensor-card { position: relative; min-height: 230px; padding: 24px; overflow: hidden; border: 1px solid var(--line); border-radius: 19px; background: #fff; box-shadow: 0 10px 35px rgba(22,54,42,.045); transition: transform .2s, box-shadow .2s; }

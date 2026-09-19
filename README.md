@@ -9,13 +9,15 @@ syncs to Farm Central, and refuses to be fooled by what it receives.
     farm/esp_link.py      sole ESP32 serial owner: readings in, pump commands out
     farm/validation.py    every input gate; nothing reaches the DB unvalidated
     farm/database.py      all SQL, fully parameterised
-    farm/mqtt_client.py   subscriber + self-verification publisher
-    farm/sync.py          Pi -> central sync worker (survives LAN loss)
-    farm/app.py           Flask dashboard
-    farm/db/*.sql         local + central schema
+    farm/mqtt_client.py   subscriber + self-verification + Challenge3 ACK
+    farm/sync.py          Pi -> central sync worker (survives LAN / WiFi loss)
+    farm/app.py           Flask dashboard (works offline on the Pi)
+    farm/db/*.sql         local + central schema + Challenge3 migration
     tools/preflight.sh    connectivity check -- RUN THIS FIRST
     tools/attack_test.py  fires hostile payloads at our own validator
+    tools/challenge3_*.py Alien Attack trigger + self-test
     docs/                 ERD, flowchart, dashboard screenshot (submissions)
+    CHALLENGE3.md         Alien Attack runbook
 
 ## Setup (blank Pi)
 
@@ -51,6 +53,17 @@ Every hostile payload must be REJECTED with a reason. The two SQL/unicode
 cases are ACCEPTED on purpose: they are inert text, defeated by
 parameterised queries and escaped rendering, not by keyword blacklists.
 
+## Challenge 3 — Alien Attack
+
+When WiFi is cut after the Challenge3 MQTT trigger, the farm must keep
+running on the edge and auto-sync every buffered reading when the link
+returns. Full runbook: [CHALLENGE3.md](CHALLENGE3.md).
+
+    python3 tools/challenge3_selftest.py  # payload + idempotency checks
+    python3 tools/challenge3_trigger.py   # publish start_challenge (while online)
+
+Required processes on the Pi: `farm.mqtt_client`, `farm.sync`, `farm.app`.
+
 ## Validation gates
 
 Size cap -> UTF-8 decode -> JSON parse -> schema and types -> physical
@@ -64,6 +77,13 @@ does not depend on the validator being perfect.
 - [ ] Dashboard screenshot showing the selfcare message -> docs/screenshot/
 - [ ] Automation flowchart -> docs/flowchart/
 - [ ] `svn commit --username hGroup10 -m "Challenge1 : Completed"`
+
+## Challenge 3 submission checklist
+
+- [ ] Edge irrigation + local logging while WiFi is blocked
+- [ ] Buffered readings auto-sync to central with no gaps / duplicates
+- [ ] Offline dashboard reachable (Ethernet or localhost on the Pi)
+- [ ] `svn commit --username hGroup10 -m "Challenge3 : Completed"`
 
 ## Open questions for the judges
 

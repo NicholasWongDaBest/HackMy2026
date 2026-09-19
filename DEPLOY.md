@@ -134,6 +134,39 @@ svn commit -m "Foundation : Completed" --username hGroup10
 If `svn.home` does not resolve, get the IP from a judge and add it to
 `/etc/hosts`. Do this **early** — not at hour 5:50.
 
+## 8. Challenge 3 — Alien Attack
+
+Apply the schema migration if the Pi DB predates this challenge:
+
+```
+sudo mysql < farm/db/migrate_challenge3.sql
+```
+
+Keep these three processes running **before** the WiFi cut:
+
+```
+python3 -m farm.mqtt_client
+python3 -m farm.sync
+python3 -m farm.app
+```
+
+Trigger (optional self-test while still online):
+
+```
+python3 tools/challenge3_selftest.py
+python3 tools/challenge3_trigger.py
+```
+
+During the blackout, open the dashboard over Ethernet
+(`http://192.168.50.20:5000`) or on the Pi itself. When WiFi returns,
+`farm.sync` drains pending rows automatically. Details: `CHALLENGE3.md`.
+
+SVN:
+
+```
+svn commit -m "Challenge3 : Completed" --username hGroup10
+```
+
 ## Objective coverage
 
 | Brief requirement | Where |

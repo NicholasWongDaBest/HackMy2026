@@ -8,7 +8,9 @@
   <title>Verdant Farm OS — {{ team }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
+  <!-- Offline-safe: if WiFi is cut (Alien Attack), fonts fail soft to system stack -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet"></noscript>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
@@ -16,6 +18,8 @@
   {% set serial_link = p.link if p.link is defined else none %}
   {% set esp_error = serial_link.error if serial_link and serial_link.error else ('ESP32 serial link disconnected' if serial_link and not serial_link.connected else none) %}
   {% set system_error = status.sensor_error or esp_error %}
+  {% set edge_offline = link and link.mode == 'edge_offline' %}
+  {% set challenge_active = challenge and challenge.active %}
   <header class="topbar">
     <a class="brand" href="#top" aria-label="Verdant Farm OS home">
       <span class="brand-mark" aria-hidden="true">
@@ -28,9 +32,9 @@
       <a href="#irrigation">Irrigation</a>
       <a href="#history">History</a>
     </nav>
-    <div class="system-chip {{ 'danger' if system_error else 'healthy' }}">
+    <div class="system-chip {{ 'danger' if system_error else ('warn' if edge_offline else 'healthy') }}">
       <span class="pulse-dot"></span>
-      {{ 'Attention needed' if system_error else 'System live' }}
+      {% if system_error %}Attention needed{% elif edge_offline %}Edge offline · buffering{% elif challenge_active %}Challenge 3 active{% else %}System live{% endif %}
     </div>
   </header>
 
@@ -72,8 +76,15 @@
         <span class="status-icon">
           <svg viewBox="0 0 24 24"><path d="M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3Zm0 2c3.7 0 5.7.9 6 1.2-.3.4-2.3 1.3-6 1.3s-5.7-.9-6-1.3C6.3 5.9 8.3 5 12 5Zm6 13c-.4.4-2.4 1-6 1s-5.6-.6-6-1v-2.5c1.5.7 3.7 1 6 1s4.5-.3 6-1V18Zm0-5.5c-.4.4-2.4 1-6 1s-5.6-.6-6-1V9.3c1.5.8 3.7 1.2 6 1.2s4.5-.4 6-1.2v3.2Z"/></svg>
         </span>
-        <div><small>Central sync</small><strong>{{ pending }} row{{ '' if pending == 1 else 's' }} pending</strong></div>
-        <span class="state-dot {{ 'warn-dot' if pending else '' }}"></span>
+        <div><small>Central sync</small><strong>{% if link and link.mode == 'edge_offline' %}Offline · {{ pending }} buffered{% elif link and link.mode == 'catching_up' %}Catching up · {{ pending }}{% else %}{{ pending }} pending{% endif %}</strong></div>
+        <span class="state-dot {{ 'warn-dot' if pending or edge_offline else '' }}"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2 3 7v2h18V7L12 2Zm-7 9v9h4v-6h6v6h4v-9H5Z"/></svg>
+        </span>
+        <div><small>Alien Attack</small><strong>{% if challenge_active %}Edge mode · local only{% else %}Standing by{% endif %}</strong></div>
+        <span class="state-dot {{ 'warn-dot' if challenge_active else '' }}"></span>
       </div>
     </section>
 
@@ -82,6 +93,17 @@
         <div><span class="kicker">Live environment</span><h2>Your farm, at a glance.</h2></div>
         <div class="section-meta"><span class="live-dot"></span> Updates every 5 seconds</div>
       </div>
+
+      {% if challenge_active or edge_offline %}
+      <div class="alert-card edge-card">
+        <span class="alert-symbol">⚡</span>
+        <div>
+          <strong>{% if challenge_active %}Challenge 3 — Alien Attack{% else %}Central link down{% endif %}</strong>
+          <p>Irrigation, sensors, and this dashboard stay fully local. Readings buffer on the Pi and auto-sync when central returns — no gaps, no duplicates.</p>
+          <small>{% if challenge and challenge.message %}{{ challenge.message }} · {% endif %}{{ pending }} row{{ '' if pending == 1 else 's' }} waiting to sync{% if link and link.last_at %} · last sync attempt {{ link.last_at }}{% endif %}</small>
+        </div>
+      </div>
+      {% endif %}
 
       {% if system_error %}
       <div class="alert-card">

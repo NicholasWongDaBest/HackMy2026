@@ -28,6 +28,9 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 TOPIC_TEST      = f"hackathon/{TEAM_NAME}/test"       # sub + pub
 TOPIC_VERIFY    = f"hackathon/{TEAM_NAME}/verify"     # sub + pub
 TOPIC_BROADCAST = "hackathon/broadcast"               # sub only (HOSTILE)
+# Alien Attack (Challenge 3): judges publish start_challenge here, then
+# cut WiFi. The farm must keep running on the edge and catch up later.
+TOPIC_CHALLENGE3 = f"hackathon/{TEAM_NAME}/Challenge3"  # sub + pub ACK
 
 # ---- Local buffer database (on the Pi) ---------------------------------
 LOCAL_DB = {
