@@ -1,6 +1,6 @@
 # Save the Farm - canonical project tracker
 
-Last updated: 2026-09-20 01:30 +08:00 (Asia/Singapore)
+Last updated: 2026-09-20 01:40 +08:00 (Asia/Singapore)
 
 This is the canonical status record for branch `nicholas` at commit `44d173c`. `STATUS.md` is an older Foundation snapshot; where it conflicts with this file, use this file.
 
@@ -286,6 +286,18 @@ Not run: current code on the Raspberry Pi, MariaDB schema/query verification, su
 6. Implement and verify Task2/3 triggers and failure behavior, integrate Task4's two-pump allocation/low-water interlock with `SensorHealth.can_irrigate()`, then physically verify Task5 before FunBox/Perfect Storm.
 
 ## Chronological change log
+
+### 2026-09-20 01:40 +08:00 - Resolve nicholas merge without regressing Task5/dashboard
+
+- Cause: the branches contain both root-level and nested project copies. Git inferred ambiguous directory/file renames, including older root controller/firmware/MQTT code colliding with existing nested copies; some eight-character conflict markers were staged as ordinary modified files.
+- Resolution: retain the active `hGroup10_Project/farm` runtime's Task1 verification, Task5 source-health safeguards, and background dashboard updates. Preserve Nicholas's Challenge2 database/query/sync additions in the separate `app` package; this does not wire those features into `farm` automatically. Keep one existing copy of identical relocated docs and serial compatibility code instead of Git's duplicate destinations.
+- Phases affected: Welcome dashboard/ESP integration, Task1 MQTT compatibility, Task2 incoming `app` functionality, Task3 sync compatibility, and Task5 health/control safeguards. No challenge submission or pump operation is part of this merge.
+- Checks/results: 38/38 hardware-free Python tests and 9/9 mocked-browser scenarios pass; 51 project Python files pass syntax parsing. Vendored Paho 1.6.1 constructor/callback/subscription compatibility checked offline, with no socket or worker thread started. Strict legacy-template rendering/escaping passed. Git confirms zero unmerged entries, zero staged conflict markers in project source/docs, and no resolved-code whitespace errors. The entire active `farm` tree is identical to pre-merge HEAD, preserving Task1/Task5/dashboard fixes.
+- Additional resolution: the separate `app` dashboard template was also incorrectly auto-merged from the older root `farm` template; retain the identical committed `app` template from both branches. The existing template does not reference Nicholas's new anomaly-chart context; chart UI integration is still outstanding and is not silently implemented by conflict resolution. Resolve legacy `app/esp32_node.ino` to Nicholas's modern JSON status/command implementation and non-resetting 10-second safety timer; omit its stray trailing comment terminator. The active canonical firmware is unchanged.
+- Duplicate cleanup: removed nine byte-identical redundant merge destinations only (root serial compatibility entry, extra MQTT backup, six relocated doc assets, outer preview). Original nested copies are retained, and removed incoming paths remain recoverable from the parent commit.
+- Unverified: merged code on Raspberry Pi, Central/MySQL behavior, physical removal/recovery, and firmware compilation. Incoming tracked virtual-environment/SVN metadata is left intact, not silently deleted; review before committing. The pre-existing canonical firmware's trailing `*/` also requires review before flashing.
+- Percentage changes: no phase scores changed; resolving Git conflicts provides no additional physical or event-service evidence.
+- Next action: review the staged merge, especially incoming `.venv`/`.svn` files, before committing or deploying. No automatic commit/push/deployment. Run the maintained runtime from this nested project directory, not the repository root.
 
 ### 2026-09-20 01:30 +08:00 - Dashboard refresh and button navigation fix
 
