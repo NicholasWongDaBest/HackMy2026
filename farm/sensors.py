@@ -52,7 +52,7 @@ class SoilSensor:
             if config.RS485_FUNC == "holding"
             else self.client.read_input_registers
         )
-        result = reader(address, count=1, slave=config.RS485_SLAVE)
+        result = reader(address, count=1, device_id=config.RS485_SLAVE)
         if result.isError():
             raise SensorError(f"modbus error reading register 0x{address:04X}: {result}")
         return result.registers[0]
