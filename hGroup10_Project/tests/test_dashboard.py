@@ -77,6 +77,13 @@ class DashboardTests(unittest.TestCase):
         self.database.sync_status = mock.Mock(return_value=(1, None))
         self.database.latest_per_sensor = mock.Mock(return_value=[self.reading])
         self.database.recent_decisions = mock.Mock(return_value=[])
+        self.central_state = {
+            "available": True, "error": None, "status": {
+                "status": "ok", "checked_at": "2026-09-20 00:00:00",
+                "scanned": 2, "unchanged": 1, "detail": "Full scan completed",
+            }, "stale": False, "accepted": 1, "rejected": 0, "rows": [], "charts": [],
+        }
+        self.database.challenge2_state = mock.Mock(return_value=self.central_state)
 
         # Import the real routes and templates against an isolated package.
         # Existing integration tests replace farm modules globally; neither
@@ -130,6 +137,7 @@ class DashboardTests(unittest.TestCase):
             "sensor-readings", "pump-status", "override-status",
             "latest-decision", "history-summary", "automation-audit",
             "reading-history", "validation-history",
+            "central-monitor",
         }
         self.assertEqual(set(fragments.live_regions()), expected)
         self.assertEqual(len(fragments.live_regions()), len(expected))
@@ -161,6 +169,37 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(PageElements(recovered).by_id("pump-status")["data-start-allowed"],
                          "true")
         self.controller.manual.assert_not_called()
+
+    def test_central_update_is_visible_and_escaped_without_changing_physical_readings(self):
+        self.central_state.update(rejected=1, rows=[{
+            "central_id": 1, "position": "<script>bad()</script>", "sensor_type": None,
+            "raw_value": "999", "verdict": "rejected", "reason": "unknown sensor type",
+            "observed_at": "now",
+        }])
+        html = self.client.get("/api/dashboard").get_data(as_text=True)
+        self.assertIn("999", html)
+        self.assertIn("42.5", html)
+        self.assertIn("NOT added to physical sensor data", html)
+        self.assertIn("&lt;script&gt;bad()&lt;/script&gt;", html)
+        self.assertNotIn("<script>bad()", html)
+        self.central_state["rows"][0].update(raw_value="24.5", verdict="accepted")
+        self.central_state.update(rejected=0, accepted=2)
+        updated = self.client.get("/api/dashboard").get_data(as_text=True)
+        self.assertIn("24.5", updated)
+        self.assertNotIn("role=\"alert\"", updated)
+        self.controller.manual.assert_not_called()
+
+    def test_central_api_never_reaches_controller_and_missing_schema_does_not_break_page(self):
+        self.central_state.update(available=False, error="Start the sync worker", stale=True)
+        self.controller.reset_mock()
+        response = self.client.get("/api/challenge2")
+        self.assertFalse(response.get_json()["available"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.controller.status.assert_not_called()
+        self.controller.manual.assert_not_called()
+        page = self.client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Start the sync worker", page.get_data(as_text=True))
 
     def test_updates_preserve_selfcare_and_rejection_escaping(self):
         self.database.latest_selfcare.return_value = {
@@ -247,6 +286,22 @@ def render_browser_fixture():
         "reason": "Invalid payload", "raw_excerpt": "<img src=x onerror=alert(1)>",
     }])
     result["escaped"] = render()
+
+    # Explicit test-only Central attack/correction data for browser rendering.
+    spec = importlib.util.spec_from_file_location("_dashboard_chart_fixture", FARM_DIRECTORY / "anomaly_chart.py")
+    chart_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(chart_module)
+    fixture.central_state.update(rejected=1, rows=[{
+        "central_id": 7, "position": "zone-1/temperature", "sensor_type": "temperature",
+        "raw_value": "999", "verdict": "rejected", "reason": "outside plausible range",
+        "observed_at": "2026-09-20 00:01:00",
+    }], charts=[chart_module.comparison("temperature",
+                           [{"value": 24, "created_at": "2026-09-20 00:00:00"}],
+                           [{"value": 999, "observed_at": "2026-09-20 00:01:00"}])])
+    result["central_attack"] = render()
+    fixture.central_state.update(rejected=0, accepted=2)
+    fixture.central_state["rows"][0].update(raw_value="25", verdict="accepted", reason="within range")
+    result["central_corrected"] = render()
     fixture.controller.start.assert_not_called()
     fixture.controller.manual.assert_not_called()
     return result

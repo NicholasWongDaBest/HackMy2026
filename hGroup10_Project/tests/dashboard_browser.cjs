@@ -226,6 +226,28 @@ async function main() {
     assert.equal(documents, 1);
     assert.deepEqual(errors, []);
     console.log("PASS: hidden tab pauses polling and returning refreshes immediately");
+
+    const beforeCentral = commands.length;
+    fragment = "central_attack";
+    await nextPoll();
+    assert((await page.locator("#central-monitor").innerText()).includes("999"));
+    assert.equal(await page.locator('#central-monitor [role="alert"]').count(), 1);
+    assert.equal(await page.locator('#central-monitor svg circle[fill="#c0392b"]').count(), 1);
+    assert((await page.locator("#sensor-readings").innerText()).includes("43.2"));
+    await page.locator("#central-monitor").scrollIntoViewIfNeeded();
+    if (process.env.DASHBOARD_SCREENSHOT) {
+      await page.locator("#central-monitor").screenshot({path: process.env.DASHBOARD_SCREENSHOT});
+    }
+    fragment = "central_corrected";
+    await nextPoll();
+    assert.equal(await page.locator('#central-monitor [role="alert"]').count(), 0);
+    assert((await page.locator("#central-monitor tbody").innerText()).includes("25"));
+    // Old rejected values stay on the historical comparison, not as current readings.
+    assert.equal(await page.locator('#central-monitor svg circle[fill="#c0392b"]').count(), 1);
+    assert.equal(commands.length, beforeCentral, "Central updates must never submit pump commands");
+    assert.equal(documents, 1);
+    assert.deepEqual(errors, []);
+    console.log("PASS: Central UPDATE/alert/chart/correction refresh live without pump commands");
   } finally {
     await browser.close();
   }

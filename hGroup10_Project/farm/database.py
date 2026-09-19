@@ -212,3 +212,52 @@ def latest_per_sensor():
             " ORDER BY s.sensor_type"
         )
         return cur.fetchall()
+
+
+def challenge2_state():
+    """Local-only view; never wait for Central while rendering the dashboard."""
+    from .central_pull import source_key
+    from .anomaly_chart import comparison
+
+    result = {"available": False, "error": None, "status": None, "rows": [],
+              "accepted": 0, "rejected": 0, "charts": [], "stale": True}
+    try:
+        with local() as conn:
+            cur = conn.cursor(dictionary=True)
+            try:
+                key = source_key()
+                cur.execute("SELECT *, TIMESTAMPDIFF(SECOND, checked_at, NOW()) AS age_s"
+                            " FROM central_pull_status WHERE source_key=%s", (key,))
+                result["status"] = cur.fetchone()
+                state = result["status"]
+                result["stale"] = (not state or state["status"] != "ok" or
+                                   state["age_s"] > max(config.SYNC_INTERVAL_S * 3, 30))
+                cur.execute("SELECT verdict, COUNT(*) AS count FROM central_rows"
+                            " WHERE source_key=%s GROUP BY verdict", (key,))
+                for row in cur.fetchall():
+                    if row["verdict"] in ("accepted", "rejected"):
+                        result[row["verdict"]] = row["count"]
+                cur.execute("SELECT central_id, position, raw_value, sensor_type, verdict,"
+                            " reason, source_time, observed_at FROM central_rows"
+                            " WHERE source_key=%s ORDER BY observed_at DESC, central_id DESC LIMIT 20",
+                            (key,))
+                result["rows"] = cur.fetchall()
+                for sensor_type in ("temperature", "moisture"):
+                    cur.execute("SELECT sensor_value AS value, created_at FROM sensor_data"
+                                " WHERE sensor_type=%s AND sensor_value BETWEEN %s AND %s"
+                                " ORDER BY id DESC LIMIT 60",
+                                (sensor_type, *config.SENSOR_RANGES[sensor_type]))
+                    physical = cur.fetchall()
+                    cur.execute("SELECT numeric_value AS value, observed_at FROM central_changes"
+                                " WHERE source_key=%s AND sensor_type=%s AND verdict='rejected'"
+                                " ORDER BY event_id DESC LIMIT 80", (key, sensor_type))
+                    result["charts"].append(comparison(sensor_type, physical, cur.fetchall()))
+                result["available"] = True
+            finally:
+                cur.close()
+    except mysql.connector.Error as exc:
+        # Missing new tables must not take the established dashboard down.
+        result["error"] = ("Central monitor unavailable (database error " +
+                           str(getattr(exc, "errno", "unknown")) +
+                           "). Start python3 -m farm.sync and check its log.")
+    return result

@@ -41,6 +41,7 @@ def dashboard_context():
         status=ctl.status(),
         decisions=database.recent_decisions(10),
         position=config.SENSOR_POSITION,
+        challenge2=database.challenge2_state(),
     )
 
 
@@ -98,6 +99,12 @@ def api_status():
 @app.route("/api/live")
 def api_live():
     return jsonify(control.get_controller().status())
+
+
+@app.get("/api/challenge2")
+def challenge2_status():
+    # Read-only endpoint: no controller, serial, MQTT, or Central connection.
+    return jsonify(database.challenge2_state()), 200, {"Cache-Control": "no-store"}
 
 
 def create_app():

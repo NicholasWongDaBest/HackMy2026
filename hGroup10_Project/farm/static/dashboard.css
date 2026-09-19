@@ -170,6 +170,14 @@ main { overflow: hidden; }
 .control-button[aria-busy="true"] { cursor: progress; }
 .action-status { min-height: 1.5em; margin: 10px 0 0; font-size: 13px; }
 .override-banner[hidden] { display: none; }
+
+.central-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.central-charts figure { margin: 0; min-width: 0; }
+.central-charts svg { width: 100%; height: auto; font-size: 12px; }
+.central-charts figcaption { font-weight: 700; }
+.central-charts p { font-size: 12px; }
+#central-monitor { scroll-margin-top: 100px; }
+#central-monitor > p, #central-monitor > .central-charts { margin: 16px 24px; }
 .control-button span { margin-right: 7px; font-size: 11px; }
 .control-button.start { color: #fff; background: var(--leaf); box-shadow: 0 10px 24px rgba(47,125,87,.22); }
 .control-button.stop { color: #93453d; border: 1px solid #e5c5c1; background: #fff; }

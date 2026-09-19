@@ -1,6 +1,16 @@
 # Save the Farm - canonical project tracker
 
-Last updated: 2026-09-20 01:40 +08:00 (Asia/Singapore)
+## Current priority - Task2 (Task5 paused by user)
+
+Task2 is implemented locally: the active sync was upload-only and legacy pull scripts missed UPDATEs to old IDs. The standalone pull also allowed unknown types and wrote an incompatible rejection shape. `farm.sync` now rescans all IDs, validates changed revisions, and records them in separate local Central-observation tables so Central data cannot overwrite local readings or reach pump control. Legacy sync commands delegate to the same implementation. The no-refresh dashboard now includes real-data comparison graphs, live warnings, accepted/rejected row details and scan freshness; a dedicated CLI previews or explicitly sends the Task2 trigger.
+
+Latest recorded Pi evidence supplied by the user: 66 tests passed; repeated Central scans checked 119 unchanged rows; the 02:27:19 dashboard showed 159 scanned, 127 accepted and 32 rejected. Five saved rejections (IDs 150-154) have in-range canopy values with positions such as `zone-2-canopy/humidity#L3283`. Their reason is an unrecognized type suffix, not an out-of-range attack. The suffix producer and the remaining 27 rejections are not yet established.
+
+Task2 suffix correction: accept only a trailing `#L` plus ASCII digits on a known type in `zone/type`, keeping original positions/raw values and all range/conflict checks. Validator revision 2 re-evaluates existing fingerprints once; prior rejection audit is preserved. Only the parser, tests and trackers/verification guide changed in this follow-up. No upload, controller, firmware, configuration or credentials changes.
+
+Checks/results: 72/72 hardware-free Python tests pass, including six new suffix, old-ID attack, and persisted-v1 revalidation tests. Both changed Python files pass syntax checks; Git whitespace checks pass. The earlier 10/10 intercepted-browser scenarios and 37-file syntax check were recorded before this parser-only patch, not rerun now. SQL integration uses an in-memory SQLite adapter; the supplied Pi output separately proves real scan execution, not live challenge acceptance. No hardware or MQTT trigger was operated by this patch. Unverified: suffix patch deployment, remaining rejection reasons, actual judge-injected anomaly/acceptance and required screenshot/SVN submission. Percentage changes: none to event completion scores; no pass claimed. Next: use the targeted suffix deployment steps in [docs/task2-verification.md](docs/task2-verification.md), preserve Pi config/sync files, restart only the sync worker, and inspect revalidated counts. Original phase estimates below are historical.
+
+Last updated: 2026-09-20 (observed Central suffix follow-up)
 
 This is the canonical status record for branch `nicholas` at commit `44d173c`. `STATUS.md` is an older Foundation snapshot; where it conflicts with this file, use this file.
 
@@ -67,7 +77,7 @@ Each phase has an explicit checklist derived from the brief's narrative, objecti
 |---|---:|---|---|---|---|---|---|
 | Welcome | 38% (6/16) | In progress | Dashboard, local schema, three-channel RS485 reader, ESP32 node, pump command path, hysteresis automation, and flowchart files exist | Pi/ESP32 integration has software tests; a prior user log showed one three-reading MySQL insert | Prove one-minute live polling, current dashboard, relay/pump, automation, correct flowchart, screenshot, and SVN completion commit | Current Pi deployment appears older than this branch; PyModbus version/API risk; serial identity, relay polarity, and wiring unverified | 10/10 integration tests pass; prior Pi log is evidence for one insertion only; no current-head hardware run |
 | Task1 | 31% (5/16) | In progress | Central DB config, local-to-central sync worker, request-only MQTT verification handler, validation, ERD source, and self-care dashboard card exist | Deploy the corrected same-topic response and capture Central's verdict | Prove Central MySQL/sync, successful MQTT acknowledgement, self-care display, rendered ERD, screenshot, and SVN commit | Automatic test-initiation payload is unknown; Central self-care fetch helper is unused; sync can duplicate | 16/16 local unit tests pass; Pi log captured the real request envelope and proved Central requires the response on the team `/test` topic |
-| Task2 | 25% (3/12) | In progress | Typed MQTT/serial readings have physical-range checks; rejections can be shown on dashboard | Trust-boundary validation exists but is incomplete | Implement/publish Challenge2 trigger; validate hostile rows inserted by Central; prevent mixed-payload bypass; comparison screenshot; SVN commit | Challenge explicitly injects into the sensor table, while direct DB values bypass validation | Mixed invalid sensor plus `message` payload was reproduced as accepted self-care text |
+| Task2 | 25% (3/12), historical event score unchanged | Implemented locally; judge evidence pending | Full Central rescan, strict type/range gate, durable changed-row audit, isolated Central display, live comparison graphs/warnings and explicit trigger CLI | 66 local Python tests and 10 browser scenarios pass | Deploy, inspect actual Central schema, run real challenge, capture comparison screenshot and SVN evidence | Pi SSH timed out; no live MariaDB/Central verification | In-memory transaction/SQL adapter and intercepted browser tests; no hardware or real injections |
 | Task3 | 31% (5/16) | In progress | Control, dashboard, and local logging are designed to run on the Pi; unsynced rows are retried automatically | Local-first buffering and retry logic exist in source | Implement trigger; prove blackout behavior; make sync idempotent; restore every row with no gaps/duplicates; SVN commit | Central insert commits before local `synced` update and has no stable idempotency key | Source traced; no real outage/recovery test |
 | Task4 | 8% (1/12) | In progress | A two-channel GPIO fallback exists as scaffolding | ESP32 water level is captured for display | Detect 25% low water; implement two pump flows, crop-health priority/allocation policy, low-water interlock, explanation, demo, and SVN commit | Default ESP backend exposes only pump 1; controller never reads water level; no zone/container model | Search found no `pump(2)` control path and no water-level decision path |
 | Task5 | 36% (5/14) | Implemented locally, hardware verification pending | Two-second source-health checks, PyModbus `device_id`/legacy `slave` compatibility, typed failures, immediate auto/manual irrigation block, same-cycle pump stop, reconnect reset, structured API state, and offline dashboard labels exist | Pi ran 29/29 pre-compatibility tests and served the dashboard, exposing the live API/config blockers; the compatibility fix passes 30/30 locally | Deploy compatibility fix; configure stable ESP32 port; prove physical timeout, alert, continued readings, recovery, photo, and SVN commit | Pi runtime used PyModbus `device_id` API and had no `NODE_SERIAL_PORT`; neither actual removal nor continued ESP32 readings has been tested | Pi log records HTTP 200 dashboard responses and the two blockers; 30/30 current hardware-free tests pass; no actuator energized |
@@ -100,12 +110,13 @@ Legend: `[x]` verified (2), `[~]` implemented/reported but not fully verified (1
 - [ ] Required self-care dashboard screenshot is absent.
 - [ ] Required SVN `Challenge1 : Completed` commit is not evidenced.
 
-### Task2 - 3/12
+### Task2 - local implementation complete; historical 3/12 event score unchanged
 
-- [ ] Required `hackathon/{teamName}/Challenge2` trigger and start message are absent.
-- [~] Abnormal typed MQTT/serial sensor values are range-checked automatically.
-- [~] Rejections can appear as a visible dashboard warning/log.
-- [~] Rejected MQTT/serial values are not inserted, but challenge-injected Central/local DB rows bypass validation and mixed payloads can be misclassified.
+- [x] Required `hackathon/{teamName}/Challenge2` trigger/message implemented in `farm.challenge2`; preview by default, explicit `--start` to send. Real delivery remains unverified.
+- [x] Full-table Central scans validate inserted/updated rows and reject unknown, ambiguous, non-finite and impossible values in local tests.
+- [x] No-refresh dashboard shows Central row states, scan health, warnings and stable-versus-rejected comparison graphs; browser regression passes.
+- [x] Central observations are isolated from sensor_data, uploads and actuator logic; local tests confirm no controller path or overwrite.
+- [ ] Actual MariaDB/Central/Pi schema, throughput and judge-injection behavior verified on-device.
 - [ ] Required stable-versus-malicious comparison screenshot is absent.
 - [ ] Required SVN `Challenge2 : Completed` commit is not evidenced.
 
