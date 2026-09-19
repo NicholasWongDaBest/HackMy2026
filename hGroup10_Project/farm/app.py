@@ -107,6 +107,14 @@ def challenge2_status():
     return jsonify(database.challenge2_state()), 200, {"Cache-Control": "no-store"}
 
 
+@app.get("/task2/report")
+def challenge2_report():
+    # Snapshot only: no controller lookup/start, MQTT trigger or Central write.
+    return (render_template("task2_report.html", team=config.TEAM_NAME,
+                            challenge2=database.challenge2_state()),
+            200, {"Cache-Control": "no-store"})
+
+
 def create_app():
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"

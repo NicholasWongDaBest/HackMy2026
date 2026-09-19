@@ -82,6 +82,7 @@ class DashboardTests(unittest.TestCase):
                 "status": "ok", "checked_at": "2026-09-20 00:00:00",
                 "scanned": 2, "unchanged": 1, "detail": "Full scan completed",
             }, "stale": False, "accepted": 1, "rejected": 0, "rows": [], "charts": [],
+            "evidence": [], "plotted_rejections": 0,
         }
         self.database.challenge2_state = mock.Mock(return_value=self.central_state)
 
@@ -201,6 +202,40 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("Start the sync worker", page.get_data(as_text=True))
 
+    def test_submission_report_is_read_only_and_escapes_actual_evidence(self):
+        self.central_state["evidence"] = [{
+            "central_id": 9, "position": "<script>bad()</script>",
+            "sensor_type": None, "raw_value": "<img src=x onerror=alert(1)>",
+            "reason": "unknown type", "observed_at": "2026-09-20 02:50:00",
+        }]
+        response = self.client.get("/task2/report")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertIn("Stable values vs. malicious data insertion", html)
+        self.assertIn("hGroup10", html)
+        self.assertIn("&lt;script&gt;bad()&lt;/script&gt;", html)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html)
+        self.assertNotIn("<script>bad()", html)
+        self.assertNotIn("dashboard.js", html)
+        self.assertNotIn("/pump/", html)
+        self.assertNotIn("http-equiv", html)
+        self.controller.status.assert_not_called()
+        self.controller.manual.assert_not_called()
+        self.controller.start.assert_not_called()
+        self.database.latest_per_sensor.assert_not_called()
+        self.database.challenge2_state.assert_called_once_with()
+
+    def test_submission_report_shows_missing_or_stale_data_without_success_claim(self):
+        self.central_state.update(available=False, error="Monitor unavailable", stale=True)
+        self.assertIn("Monitor unavailable", self.client.get("/task2/report").get_data(as_text=True))
+        self.central_state.update(available=True)
+        html = self.client.get("/task2/report").get_data(as_text=True)
+        self.assertIn("incomplete, failed or stale", html)
+        self.assertIn("No rejected Central observations recorded", html)
+        self.controller.start.assert_not_called()
+        self.controller.manual.assert_not_called()
+
     def test_updates_preserve_selfcare_and_rejection_escaping(self):
         self.database.latest_selfcare.return_value = {
             "message": "<script>alert(1)</script>", "source": "Central",
@@ -291,14 +326,32 @@ def render_browser_fixture():
     spec = importlib.util.spec_from_file_location("_dashboard_chart_fixture", FARM_DIRECTORY / "anomaly_chart.py")
     chart_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(chart_module)
-    fixture.central_state.update(rejected=1, rows=[{
+    fixture.central_state.update(rejected=1, plotted_rejections=1, rows=[{
         "central_id": 7, "position": "zone-1/temperature", "sensor_type": "temperature",
         "raw_value": "999", "verdict": "rejected", "reason": "outside plausible range",
-        "observed_at": "2026-09-20 00:01:00",
+        "observed_at": "2026-09-20 00:06:00",
     }], charts=[chart_module.comparison("temperature",
-                           [{"value": 24, "created_at": "2026-09-20 00:00:00"}],
-                           [{"value": 999, "observed_at": "2026-09-20 00:01:00"}])])
+                           [{"value": value, "created_at": f"2026-09-20 00:0{i}:00", "sensor_position": "zone-1"}
+                            for i, value in enumerate([24, 24.2, 24.1, 24.3, 24.2, 24.1])],
+                           [{"value": 999, "observed_at": "2026-09-20 00:06:00", "central_id": 7,
+                             "position": "zone-1/temperature", "reason": "temperature outside plausible range -40..85"}],
+                           (-40, 85))])
+    fixture.central_state["evidence"] = [dict(fixture.central_state["rows"][0])]
     result["central_attack"] = render()
+    soil_charts = fixture.central_state["charts"]
+    fixture.central_state["charts"] = soil_charts + [chart_module.comparison("moisture",
+        [{"value": value, "created_at": f"2026-09-20 00:0{i}:00", "sensor_position": "zone-1"}
+         for i, value in enumerate([42, 42.2, 42.1, 42, 41.9, 42.1])],
+        [{"value": -20, "observed_at": "2026-09-20 00:06:00", "central_id": 8,
+          "position": "zone-1/moisture", "reason": "moisture outside plausible range 0..100"}], (0, 100))]
+    fixture.central_state.update(rejected=2, plotted_rejections=2)
+    fixture.central_state["evidence"].append({
+        "central_id": 8, "position": "zone-1/moisture", "raw_value": "-20", "sensor_type": "moisture",
+        "reason": "moisture outside plausible range 0..100", "observed_at": "2026-09-20 00:06:00",
+    })
+    result["report"] = render("/task2/report")
+    fixture.central_state["charts"] = soil_charts
+    fixture.central_state["plotted_rejections"] = 1
     fixture.central_state.update(rejected=0, accepted=2)
     fixture.central_state["rows"][0].update(raw_value="25", verdict="accepted", reason="within range")
     result["central_corrected"] = render()

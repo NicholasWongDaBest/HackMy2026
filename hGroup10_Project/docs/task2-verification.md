@@ -1,9 +1,50 @@
 # Task 2: Central data guard
 
-Status: base implementation deployed according to user-provided Pi logs and dashboard screenshot. The `#L<number>` suffix correction is tested locally but not yet verified on the Pi. Judge completion is not confirmed.
+Status: base implementation and suffix correction are confirmed by user-provided Pi logs. The user reports the challenge now works. The new comparison/report view below is tested locally; its Pi deployment and the actual malicious-data submission screenshot are pending. Judge completion is not certified by this code change.
 Task5 is paused; its controller, sensor-health logic, serial driver and firmware are unchanged.
 
-## Current follow-up: valid types with a trailing suffix
+## Current action: deploy the comparison graph
+
+This is the only section needed for the latest graph update. There is no new package to install, no need to resend the challenge trigger, and no need to repeat the full test suite on the Pi.
+
+What is displayed:
+
+- Main graph: green in-range local measurements from `sensor_data` versus red rejected Central observations from `central_changes`, with a shared linear value/time scale. Red timestamps are when the Pi observed the row, not a fabricated server injection time.
+- Stable-value detail: the same local samples on a separately labeled zoomed value scale, so an extreme value such as 999 does not hide the normal variation. No generated baselines, filled-forward readings or fake attack values.
+- Correct sensor units and extra charts for known rejected sensor types (e.g. air temperature). Different local sensor positions are not joined into one series. A missing baseline stays empty, and the last local measurement time is printed so old history cannot be mistaken for a current measurement.
+- Last 12 recorded rejection events show Central IDs, original values, positions and reasons even if later good uploads displace the row or the judge corrects it. Unknown/non-numeric/unplottable values stay in the table; they are not guessed onto a temperature axis. Earlier false-rejection audit records are retained, not silently erased.
+- `/task2/report` is a read-only snapshot with no pump controls, auto-refresh or automatic challenge request. It offers a print/save-PDF button; the submission requirement remains a screenshot of the real comparison.
+
+Keep `farm.sync` running. With pump power disconnected, stop only the dashboard (`farm.app`) in its original terminal using Ctrl+C. Back up the existing display files before replacing them. Do not copy the full project or replace config, sync, parser, controls or firmware.
+
+In **Windows PowerShell, not SSH**:
+
+```powershell
+cd C:\Users\Yao\Downloads\HackMy2026\hGroup10_Project
+$pi = "hgroup10@192.168.200.20:/home/hgroup10/hackathon/hGroup10_Project"
+scp farm/anomaly_chart.py farm/database.py farm/app.py "${pi}/farm/"
+scp farm/templates/dashboard.html farm/templates/task2_charts.html farm/templates/task2_report.html "${pi}/farm/templates/"
+scp farm/static/dashboard.css "${pi}/farm/static/"
+```
+
+In the **same configured Pi terminal that was running the dashboard**:
+
+```bash
+cd /home/hgroup10/hackathon/hGroup10_Project
+python3 -m farm.app
+```
+
+This is the existing app startup and still starts the normal controller; isolate physical pump power during software verification. Do not launch a second app instance, and do not change its working RS485/ESP environment settings.
+
+Open `http://192.168.200.20:5000/task2/report` or click **Open submission graph** in the dashboard's Task2 panel. Hard-refresh once for the new CSS. Use **Refresh snapshot** to include new observations; the standalone view intentionally stays still while taking a screenshot. On Windows use Win+Shift+S for the visible comparison, or the browser's full-page screenshot if you also need the evidence table. Include team name, legend, local baseline, actual rejected values and their reasons; capture separate sensor charts if needed for readable text. A corrected Central row may show zero current rejections while its genuine historical red points remain.
+
+Only the screenshot from the live Pi counts as submission evidence. Test fixtures/screenshots are not judge data. If rejected rows have an unknown type, obtain the judge's confirmed type mapping instead of fabricating a temperature/moisture plot.
+
+Local checks: 82 Python tests, 11 browser scenarios, syntax across 22 maintained Python files and Git whitespace checks pass. The offline fixture graphs were visually inspected. Runtime files changed: `farm/anomaly_chart.py`, `farm/database.py`, `farm/app.py`, `farm/static/dashboard.css`, `farm/templates/dashboard.html`, `farm/templates/task2_charts.html`, `farm/templates/task2_report.html`. Tests and both READ trackers were also updated. No worker/controller/firmware changes or new dependencies.
+
+## Earlier follow-up: valid types with a trailing suffix (already verified on Pi)
+
+The supplied Pi run passed 72 tests and accepted IDs 150-154 after the fix; it revalidated 404 rows with no rejections and then reported 404 unchanged. A later dashboard screenshot showed 604 accepted / zero rejected. The steps in this older section are retained for reference, not a request to redeploy/retest the suffix fix now.
 
 The user's Pi query returned IDs 150-154 with in-range rainfall, water-level, light, humidity and air-temperature values, but positions such as `zone-2-canopy/humidity#L3283`. The previous parser treated `humidity#L3283` as the entire sensor type. These five were parser false rejections, not evidence of a malicious value; the other 27 rejection reasons and the suffix producer remain unconfirmed.
 

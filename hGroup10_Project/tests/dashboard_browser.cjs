@@ -49,6 +49,9 @@ async function main() {
         );
         return route.fulfill({status: failPoll ? 503 : 200, contentType: "text/html", body: html});
       }
+      if (url.pathname === "/task2/report") {
+        return route.fulfill({contentType: "text/html", body: fixtures.report});
+      }
       if (url.pathname.startsWith("/pump/") || url.pathname === "/auto/resume") {
         assert.equal(request.method(), "POST");
         assert.equal(request.headers().accept, "application/json");
@@ -241,13 +244,37 @@ async function main() {
     fragment = "central_corrected";
     await nextPoll();
     assert.equal(await page.locator('#central-monitor [role="alert"]').count(), 0);
-    assert((await page.locator("#central-monitor tbody").innerText()).includes("25"));
+    assert((await page.locator("#central-monitor > .table-wrap tbody").innerText()).includes("25"));
     // Old rejected values stay on the historical comparison, not as current readings.
     assert.equal(await page.locator('#central-monitor svg circle[fill="#c0392b"]').count(), 1);
     assert.equal(commands.length, beforeCentral, "Central updates must never submit pump commands");
     assert.equal(documents, 1);
     assert.deepEqual(errors, []);
     console.log("PASS: Central UPDATE/alert/chart/correction refresh live without pump commands");
+
+    const pollsBeforeReport = polls;
+    const commandsBeforeReport = commands.length;
+    await page.setViewportSize({width: 1480, height: 1100});
+    await page.goto("http://dashboard.test/task2/report");
+    assert.equal(await page.locator(".comparison-main").count(), 2);
+    assert.equal(await page.locator(".comparison-zoom").count(), 2);
+    assert.equal(await page.locator('.comparison-main circle[fill="#c0392b"]').count(), 2);
+    assert((await page.locator("#task2-report").innerText()).includes("999"));
+    assert((await page.locator("#task2-report").innerText()).includes("-20"));
+    assert((await page.locator("#task2-report").innerText()).includes("zoomed value scale"));
+    assert.equal(await page.locator('form, script[src="/static/dashboard.js"]').count(), 0);
+    await page.clock.runFor(15000);
+    assert.equal(polls, pollsBeforeReport, "submission snapshot must not auto-refresh");
+    assert.equal(commands.length, commandsBeforeReport, "submission view must not send commands");
+    if (process.env.TASK2_REPORT_SCREENSHOT) {
+      await page.locator("#task2-report").screenshot({path: process.env.TASK2_REPORT_SCREENSHOT});
+    }
+    await page.setViewportSize({width: 390, height: 844});
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    await page.emulateMedia({media: "print"});
+    assert.equal(await page.locator(".report-actions").isVisible(), false);
+    assert.deepEqual(errors, []);
+    console.log("PASS: submission comparison renders both scales, escapes evidence, fits mobile and has no polling/commands");
   } finally {
     await browser.close();
   }

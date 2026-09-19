@@ -2,6 +2,14 @@
 
 ## Current priority - Task2 (Task5 paused by user)
 
+### Latest change: submission comparison graph
+
+The one-page `Phase/Task2.pdf` was visually rechecked: submission requires a screenshot comparing stable values against malicious data insertion. Added `/task2/report`, a read-only, manually refreshed screenshot/print snapshot, linked from the dashboard. The dashboard/report share green real local series and red historical rejected Central points on a shared linear/time scale, a separately labeled stable-value zoom, and row IDs/raw values/reasons/timestamps in an evidence table. Known rejected sensor types beyond soil temperature/moisture get correctly labeled charts; unknown types remain unclassified in the table. No fake values or unit guesses; missing/stale history is explicit. Source positions are never joined into one invented line.
+
+Checks/results: 82/82 hardware-free Python tests, 11/11 intercepted-browser scenarios, 22-file Python syntax and Git whitespace checks pass. Offline dashboard/report fixture screenshots were visually reviewed. The new route never calls the controller, sends MQTT, or queries/writes Central. Phases affected: Task2 display/report only; upload, parser, control, firmware, credentials and Task5 remain unchanged. User-provided Pi output already confirms the earlier suffix fix (72 tests, corrected IDs 150-154, 404 revalidated then unchanged, later 604 accepted); broker receipt of the real trigger is recorded. The user now reports the challenge works; a fresh malicious-event screenshot and judge completion evidence have not yet been received. The new graph view has not been deployed/verified on the Pi by this change. Percentage changes: none. Next: copy only the seven runtime files listed in [task2-verification.md](docs/task2-verification.md), restart only the existing dashboard with physical pump power isolated, open `/task2/report`, and capture real evidence. No new dependencies or repeated full Pi test run needed.
+
+### Earlier implementation record (superseded by latest evidence above)
+
 Task2 is implemented locally: the active sync was upload-only and legacy pull scripts missed UPDATEs to old IDs. The standalone pull also allowed unknown types and wrote an incompatible rejection shape. `farm.sync` now rescans all IDs, validates changed revisions, and records them in separate local Central-observation tables so Central data cannot overwrite local readings or reach pump control. Legacy sync commands delegate to the same implementation. The no-refresh dashboard now includes real-data comparison graphs, live warnings, accepted/rejected row details and scan freshness; a dedicated CLI previews or explicitly sends the Task2 trigger.
 
 Latest recorded Pi evidence supplied by the user: 66 tests passed; repeated Central scans checked 119 unchanged rows; the 02:27:19 dashboard showed 159 scanned, 127 accepted and 32 rejected. Five saved rejections (IDs 150-154) have in-range canopy values with positions such as `zone-2-canopy/humidity#L3283`. Their reason is an unrecognized type suffix, not an out-of-range attack. The suffix producer and the remaining 27 rejections are not yet established.
@@ -10,7 +18,7 @@ Task2 suffix correction: accept only a trailing `#L` plus ASCII digits on a know
 
 Checks/results: 72/72 hardware-free Python tests pass, including six new suffix, old-ID attack, and persisted-v1 revalidation tests. Both changed Python files pass syntax checks; Git whitespace checks pass. The earlier 10/10 intercepted-browser scenarios and 37-file syntax check were recorded before this parser-only patch, not rerun now. SQL integration uses an in-memory SQLite adapter; the supplied Pi output separately proves real scan execution, not live challenge acceptance. No hardware or MQTT trigger was operated by this patch. Unverified: suffix patch deployment, remaining rejection reasons, actual judge-injected anomaly/acceptance and required screenshot/SVN submission. Percentage changes: none to event completion scores; no pass claimed. Next: use the targeted suffix deployment steps in [docs/task2-verification.md](docs/task2-verification.md), preserve Pi config/sync files, restart only the sync worker, and inspect revalidated counts. Original phase estimates below are historical.
 
-Last updated: 2026-09-20 (observed Central suffix follow-up)
+Last updated: 2026-09-20 (Task2 comparison/report follow-up)
 
 This is the canonical status record for branch `nicholas` at commit `44d173c`. `STATUS.md` is an older Foundation snapshot; where it conflicts with this file, use this file.
 

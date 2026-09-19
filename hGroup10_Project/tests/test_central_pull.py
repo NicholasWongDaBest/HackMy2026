@@ -312,6 +312,54 @@ class CentralPullTests(unittest.TestCase):
         self.assertEqual(result["charts"][0]["good"][0]["label"], "24")
         self.assertEqual(result["charts"][0]["bad"][0]["label"], "999")
 
+    def test_report_keeps_rejection_history_after_correction_and_new_good_rows(self):
+        self.insert(1, 999)
+        self.scan()
+        self.central.db.execute("UPDATE central SET sensor_value=25 WHERE id=1")
+        for rid in range(2, 24):
+            self.insert(rid, 24)
+        self.scan()
+        with mock.patch.object(database, "local", lambda: connected(self.local)):
+            result = database.challenge2_state()
+        self.assertEqual(result["rejected"], 0)
+        self.assertEqual(result["evidence"][0]["central_id"], 1)
+        self.assertEqual(result["evidence"][0]["raw_value"], "999")
+        self.assertEqual(result["plotted_rejections"], 1)
+        self.assertEqual(result["charts"][0]["bad"][0]["central_id"], 1)
+
+    def test_report_adds_air_temperature_chart_with_correct_units_and_baseline(self):
+        self.local.db.execute("INSERT INTO sensor_data VALUES"
+                              "(2,'zone-2-canopy','air_temperature',23.5,'2026-09-20 00:00:00',0,NULL)")
+        self.local.commit()
+        self.insert(10, 999, "zone-2-canopy/air_temperature#L123")
+        self.scan()
+        with mock.patch.object(database, "local", lambda: connected(self.local)):
+            result = database.challenge2_state()
+        air = next(c for c in result["charts"] if c["sensor_type"] == "air_temperature")
+        self.assertEqual(air["unit"], "degC")
+        self.assertEqual(air["good"][0]["label"], "23.5")
+        self.assertEqual(air["bad"][0]["label"], "999")
+        self.assertEqual(air["limits"], "-40 to 80")
+
+    def test_report_keeps_unknown_and_nonnumeric_values_in_evidence_not_fake_axes(self):
+        self.insert(1, 999, "zone-9")
+        self.insert(2, "bad-data", "zone-1/temperature")
+        self.scan()
+        with mock.patch.object(database, "local", lambda: connected(self.local)):
+            result = database.challenge2_state()
+        self.assertEqual(result["rejected"], 2)
+        self.assertEqual(result["plotted_rejections"], 0)
+        self.assertEqual({r["raw_value"] for r in result["evidence"]}, {"999", "bad-data"})
+        self.assertTrue(all(not c["bad"] for c in result["charts"]))
+
+    def test_report_does_not_include_out_of_range_local_row_in_stable_series(self):
+        self.local.db.execute("INSERT INTO sensor_data VALUES"
+                              "(2,'zone-1','temperature',999,'2026-09-20 00:01:00',0,NULL)")
+        self.local.commit()
+        with mock.patch.object(database, "local", lambda: connected(self.local)):
+            result = database.challenge2_state()
+        self.assertEqual([p["label"] for p in result["charts"][0]["good"]], ["24"])
+
     def test_upload_format_is_unchanged_and_central_rows_are_not_uploaded(self):
         self.insert(10, 26)
         self.scan()
@@ -457,6 +505,47 @@ class ValidationTests(unittest.TestCase):
                                    {"value": "NaN", "observed_at": datetime(2026, 9, 20)}])
         self.assertEqual([p["label"] for p in result["good"]], ["24"])
         self.assertEqual([p["label"] for p in result["bad"]], ["999"])
+
+    def test_chart_stable_zoom_has_shared_times_but_independent_value_scale(self):
+        local = [{"value": 24, "created_at": "2026-09-20 00:00:00"},
+                 {"value": 25, "created_at": "2026-09-20 00:01:00"}]
+        bad = [{"value": 999, "observed_at": "2026-09-20 00:02:00", "central_id": 17}]
+        result = chart.comparison("temperature", local, bad, (-40, 85))
+        self.assertEqual(result["good_count"], 2)
+        self.assertEqual(result["bad_count"], 1)
+        self.assertEqual(result["stable"]["min"], "24")
+        self.assertEqual(result["stable"]["max"], "25")
+        self.assertEqual([p["x"] for p in result["good"]], [p["x"] for p in result["stable"]["points"]])
+        self.assertLess(result["bad"][0]["y"], min(p["y"] for p in result["good"]))
+        self.assertEqual(result["bad"][0]["central_id"], 17)
+        self.assertEqual(result["first_bad_x"], result["bad"][0]["x"])
+        self.assertEqual(result["last_local"], "2026-09-20 00:01:00")
+
+    def test_chart_missing_baseline_stays_empty_and_huge_bad_values_are_not_fabricated(self):
+        result = chart.comparison("moisture", [], [
+            {"value": -20, "observed_at": "2026-09-20 00:00:00"},
+            {"value": 1e30, "observed_at": "2026-09-20 00:01:00"}])
+        self.assertEqual(result["good"], [])
+        self.assertIsNone(result["stable"])
+        self.assertEqual(result["bad_count"], 1)
+        self.assertEqual(result["omitted_bad"], 1)
+        self.assertEqual(result["bad"][0]["label"], "-20")
+
+    def test_chart_never_connects_different_sensor_positions(self):
+        result = chart.comparison("temperature", [
+            {"value": 24, "created_at": "2026-09-20", "sensor_position": "zone-1"},
+            {"value": 28, "created_at": "2026-09-20", "sensor_position": "zone-2"}], [])
+        self.assertEqual(len(result["series"]), 2)
+        self.assertEqual(result["line"], "")
+        self.assertEqual(len(result["stable"]["series"]), 2)
+
+    def test_chart_preserves_dates_across_midnight_and_negative_moisture(self):
+        result = chart.comparison("moisture", [
+            {"value": 40, "created_at": "2026-09-19 23:59:00"}], [
+            {"value": -20, "observed_at": "2026-09-20 00:01:00"}])
+        self.assertEqual(result["start_date"], "2026-09-19")
+        self.assertEqual(result["end_date"], "2026-09-20")
+        self.assertGreater(result["bad"][0]["y"], result["good"][0]["y"])
 
     def test_challenge_trigger_is_preview_only_without_explicit_start(self):
         with mock.patch.object(trigger, "publish_trigger") as send, contextlib.redirect_stdout(io.StringIO()):

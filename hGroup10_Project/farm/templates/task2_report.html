@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ team }} - Task 2 comparison</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body class="task2-report-page">
+  <main id="task2-report">
+    <header class="task2-report-header">
+      <p class="report-eyebrow">SAVE THE FARM / {{ team }} / TASK 2</p>
+      <h1>Stable values vs. malicious data insertion</h1>
+      <p>Comparison of recorded local measurements and rejected Central observations. Central data is excluded from irrigation control.</p>
+      <nav class="report-actions" aria-label="Report actions">
+        <a href="{{ url_for('dashboard') }}#central-monitor">Back to dashboard</a>
+        <a href="{{ url_for('challenge2_report') }}">Refresh snapshot</a>
+        <button type="button" onclick="window.print()">Print / save PDF</button>
+      </nav>
+    </header>
+    {% if not challenge2.available %}
+    <p class="report-warning" role="alert">{{ challenge2.error or 'Central monitor is unavailable. Start the sync worker and check its log.' }}</p>
+    {% else %}
+    <div class="report-summary">
+      <div><small>Last completed / current scan</small><strong>{{ challenge2.status.checked_at if challenge2.status else 'No scan' }}</strong><span>{{ challenge2.status.status if challenge2.status else 'unknown' }}{% if challenge2.stale %} - incomplete or stale{% endif %}</span></div>
+      <div><small>Current Central row states</small><strong>{{ challenge2.accepted }} accepted / {{ challenge2.rejected }} rejected</strong><span>Current verdicts, not historical event counts</span></div>
+      <div><small>Historical rejected points shown</small><strong>{{ challenge2.plotted_rejections|default(0) }}</strong><span>Up to 80 per sensor; local baseline up to 60 samples</span></div>
+    </div>
+    {% if challenge2.stale %}<p class="report-warning" role="alert">The scan is incomplete, failed or stale. This snapshot does not establish current Central coverage.</p>{% endif %}
+    {% include 'task2_charts.html' %}
+    {% endif %}
+    <footer class="report-footer">Read-only snapshot: refresh manually for new data. No pump commands or challenge requests are sent by this page. A graph alone does not certify judge acceptance.</footer>
+  </main>
+</body>
+</html>

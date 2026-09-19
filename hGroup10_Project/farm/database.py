@@ -220,7 +220,8 @@ def challenge2_state():
     from .anomaly_chart import comparison
 
     result = {"available": False, "error": None, "status": None, "rows": [],
-              "accepted": 0, "rejected": 0, "charts": [], "stale": True}
+              "accepted": 0, "rejected": 0, "charts": [], "stale": True,
+              "evidence": [], "plotted_rejections": 0}
     try:
         with local() as conn:
             cur = conn.cursor(dictionary=True)
@@ -242,16 +243,30 @@ def challenge2_state():
                             " WHERE source_key=%s ORDER BY observed_at DESC, central_id DESC LIMIT 20",
                             (key,))
                 result["rows"] = cur.fetchall()
-                for sensor_type in ("temperature", "moisture"):
-                    cur.execute("SELECT sensor_value AS value, created_at FROM sensor_data"
+                # Keep rejection evidence visible after corrections or many new good rows.
+                cur.execute("SELECT central_id, position, raw_value, sensor_type, reason, observed_at"
+                            " FROM central_changes WHERE source_key=%s AND verdict='rejected'"
+                            " ORDER BY event_id DESC LIMIT 12", (key,))
+                result["evidence"] = cur.fetchall()
+                cur.execute("SELECT DISTINCT sensor_type FROM central_changes"
+                            " WHERE source_key=%s AND verdict='rejected' AND sensor_type IS NOT NULL"
+                            " ORDER BY sensor_type", (key,))
+                extra_types = [row["sensor_type"] for row in cur.fetchall()
+                               if row["sensor_type"] in config.SENSOR_RANGES
+                               and row["sensor_type"] not in ("temperature", "moisture")]
+                for sensor_type in ("temperature", "moisture", *extra_types):
+                    cur.execute("SELECT sensor_value AS value, created_at, sensor_position FROM sensor_data"
                                 " WHERE sensor_type=%s AND sensor_value BETWEEN %s AND %s"
                                 " ORDER BY id DESC LIMIT 60",
                                 (sensor_type, *config.SENSOR_RANGES[sensor_type]))
                     physical = cur.fetchall()
-                    cur.execute("SELECT numeric_value AS value, observed_at FROM central_changes"
+                    cur.execute("SELECT numeric_value AS value, observed_at, central_id, position, reason"
+                                " FROM central_changes"
                                 " WHERE source_key=%s AND sensor_type=%s AND verdict='rejected'"
                                 " ORDER BY event_id DESC LIMIT 80", (key, sensor_type))
-                    result["charts"].append(comparison(sensor_type, physical, cur.fetchall()))
+                    chart = comparison(sensor_type, physical, cur.fetchall(), config.SENSOR_RANGES[sensor_type])
+                    result["charts"].append(chart)
+                    result["plotted_rejections"] += chart["bad_count"]
                 result["available"] = True
             finally:
                 cur.close()

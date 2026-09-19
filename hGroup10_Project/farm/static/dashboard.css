@@ -174,10 +174,60 @@ main { overflow: hidden; }
 .central-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
 .central-charts figure { margin: 0; min-width: 0; }
 .central-charts svg { width: 100%; height: auto; font-size: 12px; }
-.central-charts figcaption { font-weight: 700; }
+.central-charts figcaption { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-weight: 700; }
 .central-charts p { font-size: 12px; }
 #central-monitor { scroll-margin-top: 100px; }
 #central-monitor > p, #central-monitor > .central-charts { margin: 16px 24px; }
+.task2-comparison { margin: 20px 24px; }
+.task2-legend { display: flex; flex-wrap: wrap; gap: 12px 24px; font-size: 13px; font-weight: 700; }
+.task2-legend i { display: inline-block; width: 18px; height: 5px; margin-right: 7px; vertical-align: middle; background: #157347; }
+.task2-legend .rejected-key { width: 10px; height: 10px; border-radius: 50%; background: #c0392b; }
+.comparison-note, .comparison-period, .task2-evidence > p { color: var(--ink-soft); font-size: 12px; }
+.central-charts .comparison-card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.comparison-card figcaption small { font-weight: 400; color: var(--ink-soft); }
+.comparison-count { white-space: nowrap; font-size: 12px; }
+.comparison-range { color: var(--ink-soft); }
+.comparison-main text, .comparison-zoom text { font: 12px system-ui, sans-serif; }
+.comparison-empty { padding: 20px 0; color: var(--ink-soft); }
+.stable-detail { padding: 10px 12px; background: #f2f8f3; border: 1px solid #dfebdf; border-radius: 10px; }
+.stable-detail p { display: flex; justify-content: space-between; gap: 12px; margin: 0; }
+.stable-detail small { display: block; font-size: 11px; color: var(--ink-soft); }
+.task2-evidence { margin-top: 22px; }
+.task2-evidence h4 { margin-bottom: 5px; }
+.task2-evidence table { min-width: 650px; }
+.task2-evidence td { white-space: normal; overflow-wrap: anywhere; }
+.task2-report-link, .report-actions a, .report-actions button { padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--forest); text-decoration: none; font: 700 12px system-ui, sans-serif; cursor: pointer; }
+.task2-report-page { padding: 24px; background: #f3f6f2; }
+#task2-report { max-width: 1440px; margin: auto; padding: 30px; border: 1px solid var(--line); border-radius: 18px; background: #fff; }
+.report-eyebrow { color: var(--leaf); font-size: 12px; font-weight: 800; letter-spacing: .1em; }
+.task2-report-header h1 { margin: 8px 0; font-size: clamp(24px, 3vw, 34px); line-height: 1.2; }
+.task2-report-header > p:not(.report-eyebrow) { color: var(--ink-soft); }
+.report-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+.report-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 16px; border-radius: 10px; background: #f3f7f3; }
+.report-summary small, .report-summary strong, .report-summary span { display: block; }
+.report-summary small, .report-summary span { color: var(--ink-soft); font-size: 11px; }
+.report-summary strong { font-size: 16px; margin: 5px 0; }
+#task2-report .task2-comparison { margin: 22px 0; }
+.report-warning { padding: 12px; background: #fff0eb; color: #962d20; }
+#task2-report .report-footer { display: block; width: auto; margin: 20px 0 0; border-top: 1px solid var(--line); padding-top: 16px; color: var(--ink-soft); font-size: 12px; }
+@media (max-width: 700px) {
+  .task2-report-page { padding: 8px; }
+  #task2-report { padding: 16px; }
+  .report-summary { grid-template-columns: 1fr; }
+  .task2-comparison { margin: 16px; }
+  .central-charts { grid-template-columns: minmax(0, 1fr); }
+  .central-charts figcaption { flex-wrap: wrap; }
+}
+@media print {
+  .task2-report-page { padding: 0; background: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  #task2-report { max-width: none; padding: 0; border: 0; }
+  .report-actions { display: none; }
+  .task2-report-page .central-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .comparison-card, .report-summary, .task2-evidence tr { break-inside: avoid; }
+  .task2-evidence .table-wrap { overflow: visible; }
+  .task2-evidence table { min-width: 0; }
+  @page { size: A4 landscape; margin: 12mm; }
+}
 .control-button span { margin-right: 7px; font-size: 11px; }
 .control-button.start { color: #fff; background: var(--leaf); box-shadow: 0 10px 24px rgba(47,125,87,.22); }
 .control-button.stop { color: #93453d; border: 1px solid #e5c5c1; background: #fff; }

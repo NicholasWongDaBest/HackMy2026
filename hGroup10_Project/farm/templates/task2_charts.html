@@ -1,0 +1,47 @@
+<section class="task2-comparison" aria-label="Stable values versus malicious data insertion comparison">
+  <div class="task2-legend">
+    <span><i class="stable-key"></i> Green line / circles: recorded, in-range local values</span>
+    <span><i class="rejected-key"></i> Red points: rejected Central insertions or updates</span>
+  </div>
+  <p class="comparison-note">Real records only. Shared time and value axes in each main graph; red points use the time the Pi observed them, not an assumed injection time. Lines connect recorded points; no extra measurements are generated.</p>
+  <div class="central-charts">
+  {% for chart in challenge2.charts|sort(attribute='bad_count', reverse=true) %}
+    <figure class="comparison-card" data-sensor-type="{{ chart.sensor_type }}">
+      <figcaption><span>{{ chart.title }} <small>({{ chart.unit }})</small></span><span class="comparison-count {{ 'red-text' if chart.bad_count else '' }}">{{ chart.bad_count }} rejected points</span></figcaption>
+      <p class="comparison-range">{{ chart.good_count }} local samples{% if chart.limits %} | Valid range: {{ chart.limits }} {{ chart.unit }}{% endif %}</p>
+      {% if chart.has_data %}
+      <svg class="comparison-main" viewBox="0 0 670 260" role="img" aria-label="{{ chart.title }}: stable local values versus rejected Central data, shared linear scale">
+        {% for tick in chart.ticks %}<line x1="60" x2="640" y1="{{ tick.y }}" y2="{{ tick.y }}" stroke="#dce5de"/><text x="54" y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>{% endfor %}
+        {% if chart.first_bad_x is not none %}<line class="first-rejection" x1="{{ chart.first_bad_x }}" x2="{{ chart.first_bad_x }}" y1="20" y2="220" stroke="#c0392b" stroke-dasharray="4 5" opacity=".5"><title>First rejected observation in this displayed history</title></line>{% endif %}
+        {% for series in chart.series %}<polyline points="{{ series.line }}" fill="none" stroke="#157347" stroke-width="2"><title>Local sensor: {{ series.position }}</title></polyline>{% endfor %}
+        {% for point in chart.good %}<circle cx="{{ point.x }}" cy="{{ point.y }}" r="3" fill="#157347"><title>Local {{ point.position }}: {{ point.label }} {{ chart.unit }} at {{ point.at }}</title></circle>{% endfor %}
+        {% for point in chart.bad %}<circle cx="{{ point.x }}" cy="{{ point.y }}" r="5" fill="#c0392b" stroke="#fff" stroke-width="1"><title>Central ID {{ point.central_id }}: {{ point.label }} {{ chart.unit }} | {{ point.position }} | {{ point.at }} | {{ point.reason }}</title></circle>{% if loop.last %}<text x="{{ [615, [85, point.x]|max]|min }}" y="{{ point.y - 12 }}" text-anchor="middle" fill="#c0392b" font-weight="700">{{ point.label }}</text>{% endif %}{% endfor %}
+        <text x="60" y="248">{{ chart.start }}</text><text x="640" y="248" text-anchor="end">{{ chart.end }}</text>
+      </svg>
+      <p class="comparison-period">{{ chart.start_date }} to {{ chart.end_date }} | Pi / database time</p>
+      {% else %}<p class="comparison-empty">No recorded values for this sensor. No synthetic data is shown.</p>{% endif %}
+      {% if chart.stable %}
+      <div class="stable-detail">
+        <p><strong>Stable values - detail</strong><span>{{ chart.stable.min }} to {{ chart.stable.max }} {{ chart.unit }}</span></p>
+        <svg class="comparison-zoom" viewBox="0 0 670 120" role="img" aria-label="{{ chart.title }}: local readings only, independent zoomed value scale, same time axis">
+          {% for tick in chart.stable.ticks %}<line x1="60" x2="640" y1="{{ tick.y }}" y2="{{ tick.y }}" stroke="#dce5de"/><text x="54" y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>{% endfor %}
+          {% for series in chart.stable.series %}<polyline points="{{ series.line }}" fill="none" stroke="#157347" stroke-width="2"/>{% endfor %}
+          {% for point in chart.stable.points %}<circle cx="{{ point.x }}" cy="{{ point.y }}" r="2.5" fill="#157347"><title>{{ point.position }}: {{ point.label }} {{ chart.unit }} at {{ point.at }}</title></circle>{% endfor %}
+        </svg>
+        <small>Local values only; zoomed value scale, same time axis. Last local sample: {{ chart.last_local }}.</small>
+      </div>
+      {% else %}<p class="comparison-empty">No local baseline is available for this sensor. Only observed Central values can be shown.</p>{% endif %}
+      {% if not chart.bad_count %}<p class="comparison-note">No plottable rejected observations recorded for this sensor.</p>{% else %}<p class="comparison-note">Last plotted rejection: {{ chart.last_bad }}. Historical red points remain after a row is corrected.</p>{% endif %}
+      {% if chart.omitted_bad %}<p class="red-text">{{ chart.omitted_bad }} rejected values could not be plotted; consult the audit table.</p>{% endif %}
+    </figure>
+  {% else %}<p>No comparison history is available yet.</p>{% endfor %}
+  </div>
+  <div class="task2-evidence">
+    <h4>Rejected Central data - recorded evidence</h4>
+    <p>Latest 12 rejection events, including old-ID updates. Corrections do not erase history. Unknown types are not guessed onto a sensor axis; non-numeric values remain visible here.</p>
+    <div class="table-wrap"><table><thead><tr><th>Observed by Pi</th><th>Central ID / position</th><th>Received value</th><th>Rejected because</th></tr></thead><tbody>
+      {% for row in challenge2.evidence %}<tr><td>{{ row.observed_at }}</td><td>#{{ row.central_id }}<br>{{ row.position }}</td><td class="red-text"><strong>{{ row.raw_value }}</strong><br><small>{{ row.sensor_type or 'unclassified type' }}</small></td><td>{{ row.reason }}</td></tr>
+      {% else %}<tr><td colspan="4">No rejected Central observations recorded. This is not evidence of a completed challenge.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</section>

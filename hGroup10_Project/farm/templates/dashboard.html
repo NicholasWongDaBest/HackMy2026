@@ -233,7 +233,7 @@
 
       {% block central_monitor %}
       <article id="central-monitor" data-live-region class="data-card {% if challenge2.rejected %}warning-card{% endif %}">
-        <div class="data-card-head"><div><h3>Task 2 - Central data guard</h3><p>Central observations are display-only. Physical readings and irrigation stay separate.</p></div></div>
+        <div class="data-card-head"><div><h3>Task 2 - Central data guard</h3><p>Central observations are display-only. Physical readings and irrigation stay separate.</p></div><a class="task2-report-link" href="{{ url_for('challenge2_report') }}" target="_blank" rel="noopener">Open submission graph</a></div>
         {% if not challenge2.available %}
         <p class="red-text" role="status">{{ challenge2.error or 'Central monitor not started. Run python3 -m farm.sync.' }}</p>
         {% else %}
@@ -244,21 +244,7 @@
         {% endif %}
         <p><strong>{{ challenge2.accepted }}</strong> accepted observations | <strong class="red-text">{{ challenge2.rejected }}</strong> rejected observations in the latest recorded row states.</p>
         {% if challenge2.rejected %}<p class="red-text" role="alert">Invalid or ambiguous Central readings rejected. They were NOT added to physical sensor data or sent to irrigation.</p>{% endif %}
-        <div class="central-charts">
-        {% for chart in challenge2.charts %}
-          <figure><figcaption>{{ chart.sensor_type|title }} ({{ 'degC' if chart.sensor_type == 'temperature' else '%' }})</figcaption>
-          {% if chart.has_data %}
-          <svg viewBox="0 0 670 260" role="img" aria-label="{{ chart.sensor_type }}: in-range local readings versus rejected Central observations">
-            {% for tick in chart.ticks %}<line x1="60" x2="640" y1="{{ tick.y }}" y2="{{ tick.y }}" stroke="#cdded5"/><text x="54" y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>{% endfor %}
-            <polyline points="{{ chart.line }}" fill="none" stroke="#157347" stroke-width="2"/>
-            {% for point in chart.good %}<circle cx="{{ point.x }}" cy="{{ point.y }}" r="3" fill="#157347"><title>In-range local reading: {{ point.label }}</title></circle>{% if loop.last %}<text x="{{ point.x }}" y="{{ point.y - 9 }}" fill="#157347">{{ point.label }}</text>{% endif %}{% endfor %}
-            {% for point in chart.bad %}<circle cx="{{ point.x }}" cy="{{ point.y }}" r="5" fill="#c0392b"><title>Rejected Central value: {{ point.label }}</title></circle><text x="{{ point.x }}" y="{{ point.y - 9 }}" text-anchor="middle" fill="#c0392b">{{ point.label }}</text>{% endfor %}
-            <text x="60" y="248">{{ chart.start }}</text><text x="640" y="248" text-anchor="end">{{ chart.end }}</text>
-          </svg>
-          {% else %}<p>No recorded comparison data yet.</p>{% endif %}
-          <p>Green: in-range local readings. Red: rejected Central values, plotted when observed by the Pi.</p></figure>
-        {% endfor %}
-        </div>
+        {% include 'task2_charts.html' %}
         <p>Recent observed row states (including changes to old IDs). Unknown sensor types appear below, not on a guessed temperature/moisture axis. Deleted Central rows remain as last-observed audit evidence.</p>
         <div class="table-wrap"><table><thead><tr><th>Central ID</th><th>Position</th><th>Type</th><th>Received value</th><th>Verdict</th><th>Reason</th><th>Observed</th></tr></thead><tbody>
           {% for row in challenge2.rows %}<tr><td>{{ row.central_id }}</td><td>{{ row.position }}</td><td>{{ row.sensor_type or 'unknown' }}</td><td>{{ row.raw_value }}</td><td class="{{ 'red-text' if row.verdict == 'rejected' else 'green-text' }}">{{ row.verdict }}</td><td>{{ row.reason }}</td><td>{{ row.observed_at }}</td></tr>
