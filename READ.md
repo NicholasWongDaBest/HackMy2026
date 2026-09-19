@@ -1,6 +1,6 @@
 # Save the Farm — live project tracker
 
-Last updated: 2026-09-19 15:18 +08 (Asia/Kuala_Lumpur)
+Last updated: 2026-09-19 16:09 +08 (Asia/Kuala_Lumpur)
 
 This is the canonical status record. `STATUS.md` is retained as a historical snapshot from earlier on 2026-09-19; where it conflicts with this file, use this file.
 
@@ -12,31 +12,31 @@ Required phase sequence:
 
 **Welcome → Task1 → Task2 → Task3 → Task4 → Task5 → FunBox → Perfect Storm**
 
-The user reports **26 hours remain**, the hardware is assembled, and the Raspberry Pi/network setup is complete. The application has not yet been verified on the Pi. No command output or photographs from that setup were available during this audit, so those claims are recorded as user-reported rather than independently verified.
+At 15:18 +08 the user reported **26 hours remained**, the hardware was assembled, and the Raspberry Pi/network setup was complete. The application has not yet been verified on the Pi. No command output or photographs from that setup were available during this audit, so those claims are recorded as user-reported rather than independently verified.
 
-## Confirmed architecture
+## Intended architecture and current merged state
 
 - Target computer: Raspberry Pi 4 Model B, 2 GB, running the preloaded Raspberry Pi OS image specified by `Phase/welcome.pdf`.
-- The Pi is intended to own the Flask dashboard, MariaDB local buffer, irrigation control loop, GPIO relay outputs, physical button input, MQTT client, and central-database sync worker.
-- A Keyestudio ESP32 Plus board is intended to read the kit's DHT11 and analog channels, then send newline-delimited JSON to the Pi over USB serial. Current firmware reads DHT11 air temperature/humidity plus light, water level, and steam/rain channels.
+- The Pi is intended to own the Flask dashboard, MariaDB local buffer, irrigation decisions, physical button input, MQTT client, and central-database sync worker.
+- A Keyestudio ESP32 Plus board is intended to read the kit's DHT11 and analog channels, send newline-delimited JSON to the Pi over USB serial, and—according to the newly merged `esp_link.py`—receive pump commands for the relay on ESP32 IO25.
 - A separate 3-in-1 moisture/temperature/EC probe is intended to connect directly to the Pi through USB-RS485 and Modbus RTU.
-- Pump relay channels and the panel button are assigned to Pi GPIO using GPIO Zero's BCM numbering: pump 1 BCM17, pump 2 BCM27, button BCM26. These assignments are software configuration only; the physical wiring has not been verified in this audit.
+- The merged repository contains two incompatible relay architectures. `control.py` still instantiates the Pi GPIO backend (pump 1 BCM17, pump 2 BCM27), while `esp_link.py` and the ESP32 firmware describe an ESP32 IO25 relay. The physical button remains assigned to Pi BCM26. The actual relay wiring has not been verified in this audit.
 - Farm Central is configured at `192.168.98.50` for MySQL and MQTT. The Pi stores readings locally first and a separate worker attempts to copy unsynced rows to Central.
 
-Current execution paths:
+Intended execution paths after the merge:
 
 ```text
 RS485 probe -> farm.sensors -> farm.control -> local MariaDB -> dashboard
-                                      |-> Pi GPIO relay/pump 1
+                                      |-> pump command -> ESP32 IO25 relay
 
-ESP32 kit sensors -> USB serial -> farm.node_serial -> local MariaDB -> dashboard
+ESP32 kit sensors <-> farm.esp_link over one USB serial owner -> local MariaDB
 
 MQTT broadcast/test/verify -> farm.mqtt_client -> validator -> local MariaDB
 
 local MariaDB -> farm.sync -> Farm Central MySQL
 ```
 
-The ESP32 path does **not** feed the controller's in-memory state. Water-level and air-temperature readings can appear in the database/dashboard, but cannot currently stop or influence irrigation. Pump 2 exists as a generic GPIO object but has no zone-allocation control path. These are central blockers for Task4 and Perfect Storm.
+This intended path is **not operational at the merged HEAD**. `control.py` does not instantiate `esp_link`, calls an undefined `self.link`, and catches an exception class absent from `node_serial`. `esp_link` references three missing configuration values, and the ESP32 sketch does not compile. Water-level and air-temperature readings still do not influence irrigation. Pump 2 has no zone-allocation control path.
 
 ## Status scoring method
 
@@ -52,7 +52,7 @@ Each phase has an explicit, equally weighted checklist. Every criterion is worth
 
 | Phase | Completion % | Status | Completed work | Work in progress | Remaining work / blockers | Evidence and verification |
 |---|---:|---|---|---|---|---|
-| Welcome | 44% (7/16) | In progress | Hardware/Pi/network setup reported complete; dashboard, schema, sensor, relay, automation code and flowchart exist | Bring-up has not started from recorded evidence | Fix PyModbus compatibility and fail-safe defects; create DB; prove 3 real readings/minute, dashboard, pump and automation; capture screenshot; SVN submission | `farm/app.py`, `farm/control.py`, `farm/sensors.py`, `farm/actuator.py`, `farm/db/schema_local.sql`; `docs/flowchart.png` visually inspected; no Pi/hardware run recorded |
+| Welcome | 44% (7/16) | In progress | Hardware/Pi/network setup reported complete; dashboard, schema, sensor, relay, automation code and flowchart exist | Merged ESP32 sensor/pump integration is broken and bring-up has not started from recorded evidence | Repair merged controller/config/firmware; fix PyModbus and fail-safe defects; create DB; prove 3 real readings/minute, dashboard, pump and automation; capture screenshot; SVN submission | Post-merge probes reproduced controller, ESP backend, PyModbus and fail-safe failures; ESP32 static review found compile blockers; no Pi/hardware run recorded |
 | Task1 | 31% (5/16) | In progress | Central DB/MQTT/sync code, validation, ERD source and selfcare dashboard card exist | Central schema and exact message shape still need discovery | Prove Central connection and sync; prevent duplicate sync; fix MQTT self-ack loop; render ERD PNG; capture selfcare screenshot; SVN submission | Offline validator 18/18 passed; mocked dashboard rendered and escaped markup; no Central connection, live MQTT, DB sync, or screenshot verified |
 | Task2 | 25% (3/12) | In progress | Range validation can reject implausible typed MQTT/serial readings; dashboard has rejection log | Challenge-specific trigger and comparative display absent | Subscribe/publish required Challenge2 topic/message; validate every ingestion path, including Central DB; ensure bad data never reaches automation; screenshot comparison; SVN submission | Range cases passed offline; audit reproduced a mixed-payload bypass and direct DB values such as temperature 999 rendering without validation |
 | Task3 | 38% (6/16) | In progress | Local-first storage, local dashboard, retrying sync loop and edge automation are represented in code | Recovery behavior is unverified | Fix idempotency/data-shape issues; run actual offline period; prove local operation and automatic recovery with no gaps/duplicates; required trigger and SVN submission | Source traced; audit simulation reproduced a duplicate Central insert after Central commit/local commit failure; no outage test run |
@@ -67,10 +67,10 @@ Legend: `[x]` verified (2 points), `[~]` implemented/reported but not fully veri
 
 ### Welcome — 7/16
 
-- [~] At least three real sensor measures are polled every minute. Code targets moisture, temperature, and EC at 60 seconds, but current PyModbus compatibility and the register map block proof.
+- [~] At least three real sensor measures are polled every minute. Code targets moisture, temperature, and EC at 60 seconds, but PyModbus compatibility blocks RS485 calls and the merged ESP32/controller path is internally inconsistent.
 - [~] Dashboard exists. Template and route render in a mocked software check; never run against the real Pi database/hardware.
-- [~] At least one real pump can be controlled. GPIO code exists; relay/pump behavior is unverified.
-- [~] At least one explainable automation rule controls irrigation. Hysteresis logic exists; unsafe error paths remain.
+- [~] At least one real pump can be controlled. Both Pi-GPIO and ESP32-serial implementations exist, but the controller still selects Pi GPIO while the new firmware expects ESP32 relay control; neither path is verified.
+- [~] At least one explainable automation rule controls irrigation. Hysteresis logic exists, but a current sensor failure can still act on the previous dry reading and manual ON now force-starts without a valid reading.
 - [~] Minimum local database structure exists as SQL source; schema creation on the Pi is unverified.
 - [ ] Required dashboard screenshot is absent.
 - [x] Automation flowchart exists as SVG and PNG and the SVG parses.
@@ -170,7 +170,7 @@ The Keyestudio tutorial is a behavioral and wiring reference for its ESP32 kit. 
 | Steam/rain | [Rain detection section](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.4_Rain_Detection_System.html) | ESP32 ADC IO35, mapped to `rainfall` 0–100% | Reference calls this a 3–5 V steam sensor. Keep it on ESP32; output and wet/dry calibration remain unverified |
 | Water level | [Water-level section](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.9_Water_Level_Monitoring_System.html) | ESP32 ADC IO33, stored in local DB | Reference sensor is DC 5 V and only its detection area is waterproof. Current controller never consumes the reading, so there is no low-water interlock |
 | Soil moisture | [Stock analog soil section](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.8_Soil_Humidity_Monitoring_System.html) | Separate RS485 3-in-1 probe via Pi USB adapter | Actual probe model, supply, A/B wiring, baud, slave ID, function code, register map and scaling are unconfirmed. Run the scanner before trusting values |
-| Pump/relay | [Auto-irrigation section](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.10_Auto-Irrigation_System.html) | Pi BCM17/27 drive a supplied 2-channel 5 V active-low relay; two 3–5 V pumps are expected on relay contacts | Tutorial uses one ESP32 IO25 relay and includes a water-level interlock. Current Pi code assumes active-low and 3.3 V-compatible relay inputs; verify relay board model, VCC/JD-VCC, idle state, contact wiring and separate pump supply before energizing |
+| Pump/relay | [Auto-irrigation section](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.10_Auto-Irrigation_System.html) | Merged code conflicts: `control.py` selects Pi BCM17/27 GPIO, while `esp_link.py` and firmware target ESP32 IO25 | Choose the architecture that matches physical wiring, remove the unused owner, then verify active level, boot-off state, contact wiring and pump supply before energizing |
 | Physical button | [Button behavior](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.1_Lighting_System.html) | Panel switch on Pi BCM26 with internal pull-up, active when shorted to ground | Packing list button is not necessarily the stock powered module. Wire the dry contact between GPIO and ground; do not feed 5 V into Pi GPIO |
 | Web control | [Web-controlled farm](https://docs.keyestudio.com/projects/KS0567/en/latest/wiki/Arduino/project/5.11_Web-controlled_Smart_Farm.html) | Flask runs on Pi; ESP32 does not host Wi-Fi/web services | This is intentional: the Pi is the edge/server authority and the ESP32 uses USB serial |
 | Pi electrical limits | [Official Raspberry Pi GPIO documentation](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio-and-the-40-pin-header) | GPIO Zero uses BCM numbers | Pi GPIO is 3.3 V logic and motors must not be connected directly. Pumps require external power and driver/relay contacts. Never apply 5 V to a GPIO input |
@@ -183,11 +183,15 @@ Do not energize pumps or put them in water until relay logic, idle state, pump s
 
 Priority 0 — blocks safe Welcome bring-up:
 
-1. `requirements.txt` permits PyModbus 3.10+, while `farm/sensors.py` and `tools/sensor_scan.py` call the removed `slave=` keyword. With PyModbus 3.15.0, the call raises `TypeError` before any serial transaction.
-2. After an RS485 poll fails, `Controller.tick()` continues into `decide()` with the previous reading. If that prior reading is still younger than 180 seconds and dry, the controller can start the pump after the sensor has just failed.
-3. Manual override is checked before stale-reading safety, so a manually running pump can remain on with stale/no current sensor input until the independent max-runtime cutoff.
-4. The 1-second max-runtime checks in `_run()` call the pump object directly and do not write an automation-log row, despite the deployment guide expecting such evidence.
-5. Relay active level, 3.3 V input compatibility, external pump power/contact wiring, and actual BCM wiring are unverified. These must be checked before actuator tests.
+1. The merged `control.py` calls `self.link.snapshot()` although `self.link` is never initialized. Its handler references `node_serial.NodeSerialError`, which does not exist. A mocked successful RS485 poll therefore ends in `AttributeError` after inserting the readings.
+2. `esp_link.py` cannot construct its backend because `config.PUMP_BACKEND`, `config.ESP_RELAY_PIN`, and `config.ESP_KEEPALIVE_S` are absent. `control.py` imports `actuator`, not `esp_link`, so the new serial pump backend is dead code even if those settings are restored.
+3. The merged ESP32 sketch has duplicate `POSITION` and `percentOfFullScale` definitions and references undefined `RELAY_ACTIVE_HIGH`, `clampPercent`, `chk`, `setPump`, `COMMAND_TIMEOUT_MS`, and `handleCommand`. It cannot compile in its current form.
+4. Serial baud rates disagree: firmware uses 115200 while the merged Pi configuration uses 9600. Even a compiled board and repaired Python link would not communicate with defaults.
+5. `requirements.txt` permits PyModbus 3.10+, while `farm/sensors.py` and `tools/sensor_scan.py` call the removed `slave=` keyword. With PyModbus 3.15.0, the call raises `TypeError` before any serial transaction.
+6. After an RS485 poll fails, `Controller.tick()` still calls `decide()` with the previous reading. A mocked current failure with a previous fresh dry reading started pump 1.
+7. `Controller.manual("on")` now calls `pump.start(force=True)`. A mocked check proved it starts with no sensor reading and bypasses minimum rest. A manual command needs an explicit, documented safety policy rather than bypassing all start gates.
+8. The 1-second max-runtime checks in `_run()` still call the pump directly and do not write an automation-log row, despite the deployment guide expecting that evidence.
+9. The relay owner, active level, external pump power/contact wiring, boot state and actual physical pins are unresolved. Do not run either actuator self-test until the code architecture matches verified wiring.
 
 Priority 1 — blocks Tasks 1–3:
 
@@ -212,12 +216,13 @@ Priority 1 — blocks Tasks 4–Perfect Storm:
 ## Current work in progress
 
 - Hardware is assembled and Pi/network setup is reported complete.
+- Merge commit `c555596` added `esp_link.py` and altered the controller/firmware, but the resulting Welcome integration is not runnable as checked above. `READ.md` was not updated in that merge; this entry reconciles it.
 - Application deployment and all real sensor, database, dashboard, relay, pump, button, MQTT, Central DB, offline recovery, sensor-removal and combined-failure checks remain unverified.
-- The immediate engineering focus is the Welcome gate: fix software blockers, bring up the DB and sensors, then verify relay logic without water before a controlled pump test.
+- The immediate engineering focus is the Welcome gate: restore one coherent controller/ESP32 serial implementation, fix fail-safe behavior and PyModbus compatibility, then bring up the DB and sensors before any relay command.
 
 ## Setup, run, and test instructions for the current source
 
-These are the commands represented by the repository. Run them on the Pi from the repository root. Because the checked-in PyModbus range is currently incompatible with its call syntax, install a pre-3.10 release until the source/dependency fix is committed:
+The merged HEAD is not safe to deploy or run against actuators. The commands below are limited to environment/database setup and non-actuating checks. Because the checked-in PyModbus range is incompatible with its call syntax, install a pre-3.10 release until the source/dependency fix is committed:
 
 ```bash
 python3 -m venv .venv
@@ -237,16 +242,15 @@ python3 tools/sensor_scan.py /dev/ttyUSB0 9600
 python3 -m farm.sensors
 ```
 
-The current design requires four long-running Python processes, not the three listed in the old README:
+After the ESP32 integration is repaired, only one process may own its serial port. Use the integrated `esp_link` inside the Flask/control process **or** the standalone `node_serial` worker, never both. The intended repaired process set is:
 
 ```bash
-python3 -m farm.node_serial
 python3 -m farm.mqtt_client
 python3 -m farm.sync
 python3 -m farm.app
 ```
 
-Open `http://<pi-ip>:5000`. Do not run `python3 -m farm.actuator` until the relay inputs, normally-open contacts, external pump supply, inactive boot state, and dry hose/container setup are physically verified. That module energizes both configured relay channels.
+Do not start `farm.app`, `farm.actuator`, or `farm.esp_link` against connected relay hardware at the current merged HEAD. First repair and software-test the integration. Then verify the chosen relay input, normally-open contacts, external pump supply, inactive boot state, and dry hose/container setup. Both actuator self-test modules can energize a relay.
 
 Safe unresolved verification steps:
 
@@ -263,33 +267,38 @@ Safe unresolved verification steps:
 - `git status --short`: existing untracked `.DS_Store` and `Phase/`; no tracked changes existed before documentation updates.
 - Read every page/image in all eight PDFs in `Phase/` and visually inspected `docs/flowchart.png` plus relevant official wiring images.
 - `python3 tools/attack_test.py`: **18/18 reported passed**. Limitation: the test harness crash-accounting defect described above weakens this result.
-- Parsed/compiled 13 Python source files using `compile(...)`: **passed**.
+- Parsed/compiled the original 13 Python source files using `compile(...)`: **passed**.
 - `bash -n tools/preflight.sh`: **passed** syntax check.
 - Parsed `docs/flowchart.svg` as XML: **passed**.
 - Installed project dependencies plus PDF tools in an isolated `/tmp` virtual environment; `pip check`: **no broken requirements**.
 - Mocked software checks: Flask dashboard/status routes rendered, Jinja escaped a script payload, invalid pump action returned HTTP 400, valid/invalid ESP32-style readings routed as expected, and dry/wet controller decisions were exercised without real GPIO.
 - Audit probes reproduced 21 observations, including the PyModbus API failure, MQTT self-ack behavior, sensor-failure unsafe decision, missing cutoff log, DB display bypass, and duplicate sync retry.
+- Post-merge Welcome review at commit `c555596`: all 14 Python files parse and the offline validator reports 18/18, but runtime probes reproduced the missing ESP configuration, undefined controller link/exception, PyModbus failure, previous-reading pump start, and force-start without readings. Static firmware review found eight undefined/duplicate-symbol categories and the 9600/115200 baud mismatch. Arduino compilation was unavailable because `arduino-cli` is not installed.
 
 Not run: real Pi imports/runtime, MariaDB schema/query, RS485 traffic, ESP32 compile/upload, serial reads, relay/pump/button operation, Farm Central DB/MQTT, network blackout/recovery, physical sensor removal, water allocation, or Perfect Storm. No actuator was energized.
 
-## Prioritized next actions and 26-hour allocation
+## Prioritized next actions
 
-The remaining-time assumption comes directly from the user at this audit point. Suggested allocation preserves the required phase order and includes two hours of final evidence/buffer:
+Follow this sequence to restore the Welcome gate before continuing through the required phase order:
 
-1. **Hours 0–2, Welcome safety fixes:** resolve PyModbus API/version; make any current read failure invalidate control data and stop/refuse pumps; fix cutoff logging; add focused software tests.
-2. **Hours 2–5, Welcome hardware bring-up:** deploy DB/app/workers; identify serial devices; calibrate/verify three RS485 values; validate relay idle state; controlled pump/button/automation demo; screenshot and commit.
-3. **Hours 5–8, Task1:** discover Central schema, fix MQTT loop, make sync idempotent, prove selfcare/verify/sync, render ERD, capture evidence and commit.
-4. **Hours 8–11, Task2:** implement challenge trigger and validation for Central DB as well as MQTT/serial; show stable vs rejected malicious readings; commit.
-5. **Hours 11–14, Task3:** implement idempotent sync and run a real blackout/recovery test with row counts and unique IDs; commit.
-6. **Hours 14–19, Task4:** integrate water level and pump 2, define a simple auditable priority policy, test low-water allocation with dry relay/pump safety first; commit.
-7. **Hours 19–21, Task5:** enforce fail-safe degraded mode and physically remove the Modbus probe while capturing dashboard/system evidence; commit.
-8. **Hours 21–22, FunBox:** verify and explain the panel-button action and safety precedence; commit.
-9. **Hours 22–24, Perfect Storm:** run the combined scenario without restart or live patch; commit.
-10. **Hours 24–26, evidence and contingency:** screenshots/photos, submission paths, service reboot test, clean demo rehearsal, and buffer.
+1. **Welcome merge repair first:** choose the relay owner that matches wiring; restore a single `esp_link`/controller/config/firmware implementation; align baud; compile firmware; add protocol and controller tests.
+2. **Welcome safety fixes:** resolve PyModbus API/version; make every current read failure invalidate decision data and stop/refuse pumps; define safe manual-start gates; log cutoff interventions.
+3. **Welcome hardware bring-up:** deploy DB/app/workers; identify stable serial paths; calibrate/verify three RS485 values; validate relay idle state with pump power disconnected; then perform a controlled pump/button/automation demo, screenshot and commit.
+4. **Then continue in required order:** Task1 → Task2 → Task3 → Task4 → Task5 → FunBox → Perfect Storm, retaining the detailed acceptance checklists above.
 
 Mandatory work is every phase acceptance item and its evidence/submission. Optional improvements include visual polish, extra sensors, richer analytics, additional automation modes, and architectural rewrites. They should wait until the full required sequence has demonstrable evidence.
 
 ## Chronological change log
+
+### 2026-09-19 16:09 +08 — Post-merge Welcome / Priority 0 review
+
+- Changed: reconciled the tracker with merge commit `c555596`; documented the new ESP32 serial-pump design and its merged-state failures. No product source was changed.
+- Why: the merge added 512 lines across controller/config/sync/firmware work without the required tracker update, and the resulting Welcome path contains runtime and firmware compile blockers.
+- Files/phases affected: `READ.md`; Welcome and dependencies used by later phases.
+- Tests: 14 Python files parsed; preflight shell syntax passed; offline validator reported 18/18; dependency environment passed `pip check`; mocked runtime probes reproduced five critical failure classes; firmware static check found duplicate and undefined symbols plus baud mismatch.
+- Untested/blocked: Arduino compile/upload, Pi runtime, DB, real serial devices, relay/pump/button and all Central services. No actuator was energized.
+- Percentage change: Welcome remains 44% because no acceptance item gained required integration or hardware verification; the blocker list increased based on merged-source evidence.
+- Next action: repair one coherent ESP32/controller/config protocol and test it without relay power, then address RS485 and fail-safe defects.
 
 ### 2026-09-19 15:18 +08 — Initial evidence-based audit
 
@@ -300,4 +309,3 @@ Mandatory work is every phase acceptance item and its evidence/submission. Optio
 - Untested/blocked: all physical hardware and event-service verification listed above.
 - Percentage change: initial checklist baseline established; no prior canonical percentages existed.
 - Next action: fix the Welcome PyModbus and fail-safe control blockers, then perform a non-actuating Pi bring-up before any pump test.
-
