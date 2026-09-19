@@ -101,7 +101,7 @@ MOISTURE_OFF_ABOVE = float(os.getenv("MOISTURE_OFF_ABOVE", "45.0"))
 
 # Safety envelope. These bound the automation regardless of what the
 # sensor claims -- a stuck-low probe must not run the pump forever.
-PUMP_MAX_RUN_S  = int(os.getenv("PUMP_MAX_RUN_S", "30"))
+PUMP_MAX_RUN_S  = int(os.getenv("PUMP_MAX_RUN_S", "10"))
 PUMP_MIN_REST_S = int(os.getenv("PUMP_MIN_REST_S", "60"))
 
 # Refuse to irrigate on a reading older than this (sensor died mid-run).
@@ -114,9 +114,17 @@ READING_STALE_S = int(os.getenv("READING_STALE_S", "180"))
 # Prefer a stable /dev/serial/by-id/... path when one is available.
 # ttyUSB0 is the RS485 adapter. Pin BOTH to /dev/serial/by-id/... paths
 # before the demo: plug order decides the numbering on every reboot.
-NODE_SERIAL_PORT = os.getenv("NODE_SERIAL_PORT", "/dev/ttyUSB1")
+NODE_SERIAL_PORT = os.getenv("NODE_SERIAL_PORT", "").strip()
 NODE_SERIAL_BAUD = int(os.getenv("NODE_SERIAL_BAUD", "9600"))
 NODE_POSITION = os.getenv("NODE_POSITION", "zone-2-canopy")
+NODE_SERIAL_LOCK = os.getenv(
+    "NODE_SERIAL_LOCK", "/tmp/hgroup10-esp32-serial.lock"
+)
+
+# The relay is on ESP32 GPIO 25 and is commanded over the serial link.
+# Use PUMP_BACKEND=gpio only if the relay is physically moved to the Pi.
+PUMP_BACKEND = os.getenv("PUMP_BACKEND", "esp").lower()
+ESP_RELAY_PIN = int(os.getenv("ESP_RELAY_PIN", "25"))
 
 # Physical plausibility for the node's channels. Anything outside these
 # is corrupt data, not a measurement -- same rule as the RS485 probe.

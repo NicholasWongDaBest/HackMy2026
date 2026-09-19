@@ -35,12 +35,29 @@ Check: `mysql -u farm -pfarm farm_local -e "SHOW TABLES; DESCRIBE sensor_data;"`
 You should see sensor_data, selfcare_message, rejected_messages, sync_log,
 automation_log and the `sensor` view.
 
-## 3. Find the sensor
+## 3. Find both serial devices
 
 ```
-ls /dev/ttyUSB*                       # expect /dev/ttyUSB0
+ls -l /dev/serial/by-id/
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 sudo usermod -aG dialout $USER        # then log out and back in
-python3 tools/sensor_scan.py /dev/ttyUSB0 9600
+```
+
+Identify the RS485 adapter and the ESP32 from the `by-id` names. Export
+those stable paths instead of relying on plug-order-dependent ttyUSB
+numbers:
+
+```
+export RS485_PORT=/dev/serial/by-id/<rs485-adapter-id>
+export NODE_SERIAL_PORT=/dev/serial/by-id/<esp32-id>
+export NODE_SERIAL_BAUD=9600
+export PUMP_BACKEND=esp
+```
+
+Then scan the RS485 probe:
+
+```
+python3 tools/sensor_scan.py "$RS485_PORT" 9600
 ```
 Read the dump. Identify which register looks like moisture (0-100 after
 /10), temperature (~20-35 after /10) and EC (hundreds to low thousands).
@@ -50,14 +67,15 @@ answers, try baud 4800 and 19200 before suspecting the probe.
 
 Check: `python3 -m farm.sensors` prints three plausible numbers.
 
-## 4. Relay self-test — no water yet
+## 4. ESP32 and relay self-test — no water yet
 
 ```
-python3 -m farm.actuator
+python3 -m farm.esp_link
 ```
-You should hear each relay click on for 1.5 s. If a relay clicks
-*inverted* (energised at rest), set `RELAY_ACTIVE_HIGH=1` in the
-environment.
+You should see the serial link connect and hear the relay click on for
+3 seconds. Do not run `farm.node_serial` at the same time; the Flask app
+owns this bidirectional link. If the relay is inverted, change
+`RELAY_ACTIVE_LOW` in the ESP32 sketch and re-upload it.
 
 **Only put the pump in water once this passes.**
 
@@ -72,9 +90,8 @@ Check, in order:
 - three live sensor tiles showing real numbers
 - "Pump 1" card says STOPPED
 - press **Pump ON** — relay clicks, pump runs, card flips to RUNNING
-- wait 30 s — safety cutoff stops it on its own, automation log shows
-  `pump_off / safety / max runtime 30s exceeded`
-- press the physical button — pump toggles
+- wait 10 s — the ESP32 safety cutoff stops it on its own and reports
+  `safety_timeout`
 - dry the probe (lift it out of the soil) and wait one tick — automation
   log shows `pump_on / auto / moisture N% below threshold 30%`
 
@@ -91,6 +108,10 @@ After=network.target mariadb.service
 [Service]
 User=hgroup10
 WorkingDirectory=/home/hgroup10/farm-project
+Environment=RS485_PORT=/dev/serial/by-id/<rs485-adapter-id>
+Environment=NODE_SERIAL_PORT=/dev/serial/by-id/<esp32-id>
+Environment=NODE_SERIAL_BAUD=9600
+Environment=PUMP_BACKEND=esp
 ExecStart=/usr/bin/python3 -m farm.app
 Restart=always
 [Install]
@@ -119,7 +140,7 @@ If `svn.home` does not resolve, get the IP from a judge and add it to
 |---|---|
 | 3 sensors, poll every 1 min | `farm/sensors.py`, `POLL_INTERVAL_S=60` |
 | Dashboard exists | `farm/app.py` + `templates/dashboard.html` |
-| Irrigation control, >=1 pump | `farm/actuator.py`, web + physical button |
+| Irrigation control, >=1 pump | `farm/esp_link.py`, dashboard + ESP32 GPIO25 |
 | Automation logic | `farm/control.py` `decide()`, logged to automation_log |
 | Min database requirement | `farm/db/schema_local.sql` sensor_data |
 | Flowchart | `docs/flowchart.svg` / `.png` |

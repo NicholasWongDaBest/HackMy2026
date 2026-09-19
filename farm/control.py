@@ -1,9 +1,8 @@
 """The control loop: poll -> store -> decide -> act -> log.
 
-Runs as a background thread inside the Flask app so that exactly one
-process owns the GPIO lines. The dashboard's manual button and the
-automation both act through this module, which is why the physical
-button, the web button and the automation can never fight over the relay.
+Runs as a background thread inside the Flask app. The dashboard and the
+automation both use the singleton in farm/esp_link.py, so one process
+owns the ESP32 serial connection and all relay commands are serialized.
 
 The automation rule, stated plainly so it can be defended to a judge:
 
@@ -14,7 +13,7 @@ The automation rule, stated plainly so it can be defended to a judge:
     The gap between those two thresholds is hysteresis. Without it the
     pump chatters on and off around a single setpoint.
 
-    Overriding everything, in farm/actuator.py:
+    Overriding everything, in farm/esp_link.py and the ESP32 firmware:
       * pump runs at most PUMP_MAX_RUN_S
       * pump rests at least PUMP_MIN_REST_S between runs
       * a reading older than READING_STALE_S is not acted on at all
@@ -25,21 +24,16 @@ import logging
 import threading
 import time
 
-from . import actuator, config, database, node_serial, sensors
+from . import config, database, esp_link, sensors
 
 log = logging.getLogger("control")
 
 
 class Controller:
     def __init__(self):
-        self.hw = actuator.get_hardware()
+        self.hw = esp_link.get_hardware()
         self.latest = {}
         self.latest_at = 0.0
-        # The ESP32's own channels, kept for display only. They never
-        # take part in the irrigation decision.
-        self.node_latest = {}
-        self.node_latest_at = 0.0
-        self.node_error = None
         self.last_error = None
         self.last_decision = None
         self._thread = None
@@ -55,10 +49,9 @@ class Controller:
         scaling factor anyone would have to justify to a judge. Raises on
         failure -- a failed read must never become a stored number.
 
-        The ESP32's channels are collected separately. Its serial reader
-        already validates and stores each row as it arrives, so they are
-        only snapshotted here for the dashboard, never inserted twice and
-        never fed into decide().
+        The ESP32 link independently receives, validates and stores its
+        canopy readings. They appear on the dashboard from MySQL and are
+        never fed into this RS485 soil-moisture decision.
         """
         readings = sensors.read_all()
         for sensor_type, value in readings.items():
@@ -67,15 +60,6 @@ class Controller:
         self.latest_at = time.time()
         self.last_error = None
         log.info("stored %d probe readings: %s", len(readings), readings)
-
-        try:
-            self.node_latest, self.node_latest_at = self.link.snapshot()
-            self.node_error = None
-        except node_serial.NodeSerialError as exc:
-            # The node being quiet is not a reason to stop irrigating:
-            # the probe is what the decision depends on.
-            self.node_latest, self.node_latest_at = {}, 0.0
-            self.node_error = str(exc)
 
         return readings
 
@@ -149,10 +133,9 @@ class Controller:
     def manual(self, action: str) -> tuple:
         """The dashboard's ON/OFF buttons. Deliberately no override timer.
 
-        Pressing ON re-sends the command even when the pump is already
-        running, which restarts the board's safety window. So pressing ON
-        again is how you irrigate for longer -- previously it silently
-        extended a countdown that nothing visible explained.
+        Pressing ON sends a command immediately. The ESP32 still owns the
+        independent 10-second cutoff; repeated commands cannot silently
+        extend a run that is already in progress.
 
         Nothing is needed to stop the automation fighting the button:
         after any stop, PUMP_MIN_REST_S already blocks an automatic
@@ -235,12 +218,6 @@ class Controller:
             "readings": self.latest,
             "reading_age_s": round(time.time() - self.latest_at, 1) if self.latest_at else None,
             "sensor_error": self.last_error,
-            "node_readings": self.node_latest,
-            "node_age_s": (
-                round(time.time() - self.node_latest_at, 1)
-                if self.node_latest_at else None
-            ),
-            "node_error": self.node_error,
             "pumps": self.hw.state(),
             "last_decision": self.last_decision,
             "manual_override_s": max(0, round(self._manual_until - time.time())),

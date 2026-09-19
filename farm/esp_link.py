@@ -6,16 +6,15 @@ interface actuator.Hardware provides, so control.py and the dashboard do
 not care which board drives the relay.
 
 WHY THE PI STILL ENFORCES SAFETY
-The ESP32 has its own watchdog (max runtime, link-loss cutoff) because a
-Pi that has lost the cable cannot stop a pump. The Pi keeps its own
-max-runtime and minimum-rest rules anyway: two independent layers, and
-neither depends on the other being correct. The Pi's keepalive is what
-the board's watchdog listens for -- stop sending and the pump stops.
+The ESP32 has its own 10-second maximum-runtime cutoff because a Pi that
+has lost the cable cannot stop a pump. The Pi keeps its own max-runtime
+and minimum-rest rules as a second independent safety layer.
 
-Run:  python3 -m app.esp_link      (link self-test, no water needed)
+Run:  python3 -m farm.esp_link      (link self-test, no water needed)
 """
 import json
 import logging
+import os
 import threading
 import time
 
@@ -23,9 +22,18 @@ import serial
 
 from . import config, database, validation
 
+try:
+    import fcntl
+except ImportError:  # Windows development; the production target is Linux.
+    fcntl = None
+
 log = logging.getLogger("esp_link")
 
 SOURCE = f"serial:{config.NODE_SERIAL_PORT}"
+
+
+class SerialOwnershipError(RuntimeError):
+    """Another process already owns the ESP32 serial device."""
 
 
 class EspLink:
@@ -36,6 +44,7 @@ class EspLink:
         self._write_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
+        self._owner_lock = None
         self.connected = False
         self.last_line_at = 0.0
         self.esp_pump_state = None     # what the BOARD last reported
@@ -44,6 +53,9 @@ class EspLink:
 
     # -- lifecycle ------------------------------------------------------
     def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="esp_link")
         self._thread.start()
 
@@ -55,22 +67,66 @@ class EspLink:
             pass
         if self._thread:
             self._thread.join(timeout=3)
-        if self._port:
-            try:
+        self._close_port()
+
+    def _acquire_owner_lock(self):
+        if fcntl is None or self._owner_lock is not None:
+            return
+        lock = open(config.NODE_SERIAL_LOCK, "a+", encoding="ascii")
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            lock.close()
+            raise SerialOwnershipError(
+                "ESP32 serial link is already owned by another process"
+            ) from exc
+        lock.seek(0)
+        lock.truncate()
+        lock.write(str(os.getpid()))
+        lock.flush()
+        self._owner_lock = lock
+
+    def _release_owner_lock(self):
+        if self._owner_lock is None:
+            return
+        try:
+            if fcntl is not None:
+                fcntl.flock(self._owner_lock.fileno(), fcntl.LOCK_UN)
+            self._owner_lock.close()
+        finally:
+            self._owner_lock = None
+
+    def _close_port(self):
+        try:
+            if self._port:
                 self._port.close()
-            except Exception:
-                pass
+        except Exception:
+            pass
+        self._port = None
+        self.connected = False
+        self._release_owner_lock()
 
     def _open(self):
-        self._port = serial.Serial(
-            port=config.NODE_SERIAL_PORT,
-            baudrate=config.NODE_SERIAL_BAUD,
-            timeout=1,
-        )
+        if not config.NODE_SERIAL_PORT:
+            raise SerialOwnershipError(
+                "NODE_SERIAL_PORT is not configured; use a /dev/serial/by-id/... path"
+            )
+        self._acquire_owner_lock()
+        try:
+            self._port = serial.Serial(
+                port=config.NODE_SERIAL_PORT,
+                baudrate=config.NODE_SERIAL_BAUD,
+                timeout=1,
+            )
+        except Exception:
+            self._release_owner_lock()
+            raise
         self.connected = True
         self.last_error = None
         log.info("opened %s at %d baud",
                  config.NODE_SERIAL_PORT, config.NODE_SERIAL_BAUD)
+        # A reconnect always begins from the safest known state.
+        self.pump(False)
 
     # -- reader ---------------------------------------------------------
     def _run(self):
@@ -87,19 +143,18 @@ class EspLink:
                 self.connected = False
                 self.last_error = str(exc)
                 log.error("serial error: %s -- retrying in 5s", exc)
-                try:
-                    if self._port:
-                        self._port.close()
-                except Exception:
-                    pass
-                self._port = None
+                self._close_port()
                 for _ in range(5):
                     if self._stop.is_set():
                         break
                     time.sleep(1)
-            except Exception:
+            except Exception as exc:
+                self.last_error = str(exc)
                 log.exception("reader error")
-                time.sleep(1)
+                self._close_port()
+                self._stop.wait(5)
+
+        self._close_port()
 
     def _handle(self, raw: bytes):
         """One line from the board. Never raises: a bad line is recorded
@@ -154,7 +209,14 @@ class EspLink:
             return False
 
     def pump(self, on: bool) -> bool:
-        return self.send({"cmd": "pump", "state": "on" if on else "off"})
+        state = "on" if on else "off"
+        sent = self.send({"cmd": "pump", "state": state})
+        if sent:
+            # Optimistic state for an immediate dashboard response. The
+            # ESP32's status line confirms or corrects it moments later.
+            self.esp_pump_state = state
+            self.esp_last_reason = "command_sent"
+        return sent
 
     def status(self) -> dict:
         return {
@@ -185,10 +247,17 @@ class EspPump:
         self.stopped_at = 0.0
         self._running = False
         self._lock = threading.Lock()
-        self._last_keepalive = 0.0
 
     @property
     def running(self) -> bool:
+        reported = self.link.esp_pump_state
+        if reported == "off" and self._running:
+            self._running = False
+            self.started_at = None
+            self.stopped_at = time.time()
+        elif reported == "on" and not self._running:
+            self._running = True
+            self.started_at = time.time()
         return self._running
 
     @property
@@ -215,36 +284,29 @@ class EspPump:
                 return False, "could not send command to ESP32"
             self._running = True
             self.started_at = time.time()
-            self._last_keepalive = time.time()
             log.info("pump %d ON (esp32)", self.id)
             return True, "started"
 
     def stop(self, reason: str = "commanded"):
         with self._lock:
-            if not self._running:
-                return False, "already stopped"
-            self.link.pump(False)      # send regardless; stop is never refused
+            was_running = self.running
+            if not self.link.pump(False):
+                return False, "could not send stop command to ESP32"
             self._running = False
             self.started_at = None
             self.stopped_at = time.time()
             log.info("pump %d OFF (%s)", self.id, reason)
-            return True, reason
+            return True, reason if was_running else "already stopped; stop command sent"
 
     def enforce_max_runtime(self):
-        """Called every second by the control loop. Two jobs: the Pi's own
-        max-runtime cutoff, and the keepalive the board's watchdog needs.
-        Stop sending these and the board shuts the pump off by itself."""
-        if not self._running:
+        """Apply the Pi-side cutoff and observe the ESP32-side cutoff."""
+        if not self.running:
             return None
 
         if self.run_seconds > config.PUMP_MAX_RUN_S:
             self.stop(f"safety cutoff at {config.PUMP_MAX_RUN_S}s")
             return f"max runtime {config.PUMP_MAX_RUN_S}s exceeded"
 
-        now = time.time()
-        if now - self._last_keepalive >= config.ESP_KEEPALIVE_S:
-            self.link.pump(True)
-            self._last_keepalive = now
         return None
 
     def close(self):

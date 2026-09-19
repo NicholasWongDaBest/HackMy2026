@@ -6,6 +6,7 @@ syncs to Farm Central, and refuses to be fooled by what it receives.
 ## Layout
 
     farm/config.py        credentials + tunables (env-overridable)
+    farm/esp_link.py      sole ESP32 serial owner: readings in, pump commands out
     farm/validation.py    every input gate; nothing reaches the DB unvalidated
     farm/database.py      all SQL, fully parameterised
     farm/mqtt_client.py   subscriber + self-verification publisher
@@ -34,7 +35,12 @@ syncs to Farm Central, and refuses to be fooled by what it receives.
     bash tools/preflight.sh          # can we even reach central?
     python3 -m farm.mqtt_client      # terminal 1
     python3 -m farm.sync             # terminal 2
+    export NODE_SERIAL_PORT=/dev/serial/by-id/<esp32-id>
     python3 -m farm.app              # terminal 3 -> http://<pi-ip>:5000
+
+Do not run `farm.node_serial` beside `farm.app`; the app owns the same
+bidirectional ESP32 serial connection. A Linux lock rejects accidental
+second owners.
 
 ## Prove it can't be fooled
 
