@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farm Control - {{ team }}</title>
+<meta http-equiv="refresh" content="5">
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#272b35; --text:#e8eaed;
+          --muted:#9aa0aa; --ok:#3ddc84; --warn:#ffb020; --bad:#ff5c5c;
+          --accent:#5b9dff; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--text);
+         font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+          margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+             color:var(--muted); margin:0 0 12px; font-weight:600; }
+  .selfcare { font-size:18px; line-height:1.45; word-break:break-word; }
+  .big { font-size:30px; font-weight:600; }
+  .unit { font-size:15px; color:var(--muted); font-weight:400; margin-left:4px; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:500; padding:6px 8px;
+       border-bottom:1px solid var(--line); }
+  td { padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  code { background:#0b0d11; padding:2px 5px; border-radius:4px;
+         font-size:12px; word-break:break-all; }
+  .wide { grid-column:1/-1; }
+  .pumpstate { font-size:34px; font-weight:700; letter-spacing:.02em; }
+  .btnrow { display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
+  button { font:inherit; font-weight:600; padding:11px 20px; border-radius:8px;
+           border:1px solid var(--line); background:#222732; color:var(--text);
+           cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on  { background:#14361f; border-color:var(--ok);  color:var(--ok); }
+  button.off { background:#3a1a1a; border-color:var(--bad); color:var(--bad); }
+  .rule { background:#0b0d11; border-radius:8px; padding:12px 14px; font-size:13px;
+          line-height:1.7; color:var(--muted); }
+  .rule b { color:var(--text); font-weight:600; }
+  .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px;
+          border:1px solid var(--line); color:var(--muted); }
+  .pill.auto { border-color:var(--accent); color:var(--accent); }
+  .pill.manual { border-color:var(--warn); color:var(--warn); }
+  .pill.safety { border-color:var(--bad); color:var(--bad); }
+</style>
+</head>
+<body>
+  <h1>Farm Control &mdash; {{ team }}</h1>
+  <div class="sub">
+    Auto-refresh 5s &middot; polling every {{ status.thresholds.poll_interval_s }}s
+    &middot; probe at <b>{{ position }}</b> &middot; all values rendered escaped
+  </div>
+
+  <!-- ============ LIVE SENSORS ============ -->
+  <div class="grid">
+    {% for r in live %}
+    <div class="card">
+      <h2>{{ r.sensor_type }}</h2>
+      <div class="big">{{ r.sensor_value }}<span class="unit">
+        {%- if r.sensor_type in ('moisture', 'humidity', 'light', 'water_level', 'rainfall') %}%
+        {%- elif r.sensor_type in ('temperature', 'air_temperature') %}&deg;C
+        {%- elif r.sensor_type == 'ec' %}&micro;S/cm{% endif -%}
+      </span></div>
+      <div class="sub" style="margin:6px 0 0">{{ r.created_at }}</div>
+    </div>
+    {% else %}
+    <div class="card">
+      <h2>Sensors</h2>
+      <div class="big bad">&mdash;</div>
+      <div class="sub" style="margin:6px 0 0">No readings yet</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if status.sensor_error %}
+  <div class="card wide" style="border-color:var(--bad);margin-bottom:16px">
+    <h2 class="bad">Sensor fault</h2>
+    <code>{{ status.sensor_error }}</code>
+    <div class="sub" style="margin-top:8px">
+      Readings are not being stored. The pump will not run on stale data.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ============ IRRIGATION CONTROL ============ -->
+  <div class="grid">
+    <div class="card">
+      <h2>Pump 1 &mdash; irrigation</h2>
+      {% set p = status.pumps[1] %}
+      <div class="pumpstate {{ 'ok' if p.running else 'muted' }}">
+        {{ 'RUNNING' if p.running else 'STOPPED' }}
+      </div>
+      <div class="sub" style="margin-top:6px">
+        ESP32 IO{{ p.pin }} &middot;
+        {% if p.running %}
+          running {{ p.run_seconds }}s of max {{ status.thresholds.max_run_s }}s
+        {% elif p.rest_seconds %}
+          resting {{ p.rest_seconds }}s of min {{ status.thresholds.min_rest_s }}s
+        {% else %}
+          never run
+        {% endif %}
+      </div>
+      <div class="btnrow">
+        <form method="post" action="/pump/on"><button class="on">Pump ON</button></form>
+        <form method="post" action="/pump/off"><button class="off">Pump OFF</button></form>
+      </div>
+      {% if status.manual_override_s %}
+      <div class="sub" style="margin-top:12px">
+        <span class="pill manual">manual override</span>
+        automation resumes in {{ status.manual_override_s }}s
+        <form method="post" action="/auto/resume" style="display:inline">
+          <button style="padding:4px 10px;font-size:12px;margin-left:8px">Resume auto now</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Automation rule</h2>
+      <div class="rule">
+        IF moisture &lt; <b>{{ status.thresholds.on_below }}%</b> &rarr; start pump<br>
+        IF moisture &gt; <b>{{ status.thresholds.off_above }}%</b> &rarr; stop pump<br>
+        ELSE &rarr; hold (hysteresis band)<br><br>
+        Safety, always enforced:<br>
+        max run <b>{{ status.thresholds.max_run_s }}s</b> &middot;
+        min rest <b>{{ status.thresholds.min_rest_s }}s</b><br>
+        stale reading &rarr; <b>fail safe, pump off</b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Last decision</h2>
+      {% if status.last_decision %}
+        <div class="big" style="font-size:20px">{{ status.last_decision.decision }}</div>
+        <div class="sub" style="margin-top:8px">{{ status.last_decision.reason }}</div>
+        <div style="margin-top:10px">
+          <span class="pill {{ status.last_decision.source }}">{{ status.last_decision.source }}</span>
+        </div>
+      {% else %}
+        <div class="big warn" style="font-size:20px">&mdash;</div>
+        <div class="sub" style="margin-top:8px">Control loop has not ticked yet</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ============ AUTOMATION AUDIT ============ -->
+  <div class="grid">
+    <div class="card wide">
+      <h2>Automation log &mdash; why the pump did what it did</h2>
+      <table>
+        <tr><th>When</th><th>Decision</th><th>Source</th><th>Moisture</th>
+            <th>Temp</th><th>EC</th><th>Pump</th><th>Reason</th></tr>
+        {% for d in decisions %}
+        <tr>
+          <td>{{ d.created_at }}</td>
+          <td><b>{{ d.decision }}</b></td>
+          <td><span class="pill {{ d.source }}">{{ d.source }}</span></td>
+          <td>{{ d.moisture if d.moisture is not none else '-' }}</td>
+          <td>{{ d.temperature if d.temperature is not none else '-' }}</td>
+          <td>{{ d.ec if d.ec is not none else '-' }}</td>
+          <td class="{{ 'ok' if d.pump_state else 'muted' }}">{{ 'on' if d.pump_state else 'off' }}</td>
+          <td class="sub">{{ d.reason }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="warn">No decisions recorded yet</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ CENTRAL / SECURITY (Task 1) ============ -->
+  <div class="grid">
+    <div class="card">
+      <h2>Selfcare message (central)</h2>
+      {% if selfcare %}
+        <div class="selfcare">{{ selfcare.message }}</div>
+        <div class="sub" style="margin:10px 0 0">
+          via {{ selfcare.source }} &middot; {{ selfcare.received_at }}
+        </div>
+      {% else %}
+        <div class="selfcare warn">No message received yet</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Rejected messages</h2>
+      <div class="big {{ 'bad' if total_rejected else 'ok' }}">{{ total_rejected }}</div>
+      <div class="sub" style="margin-top:6px">
+        {% if rejections %}Last: {{ rejections[0].reason }}{% else %}Nothing rejected{% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Sync to central</h2>
+      <div class="big {{ 'warn' if pending else 'ok' }}">{{ pending }}</div>
+      <div class="sub" style="margin-top:6px">
+        rows pending &middot;
+        {% if last_sync %}
+          last run {{ last_sync.ran_at }}
+          <span class="{{ 'ok' if last_sync.status == 'ok' else 'bad' }}">
+            ({{ last_sync.status }})</span>
+        {% else %}never run{% endif %}
+      </div>
+    </div>
+
+    <div class="card wide">
+      <h2>Recent readings</h2>
+      <table>
+        <tr><th>Position</th><th>Type</th><th>Value</th><th>Recorded</th><th>Synced</th></tr>
+        {% for r in readings %}
+        <tr>
+          <td>{{ r.sensor_position }}</td>
+          <td>{{ r.sensor_type }}</td>
+          <td>{{ r.sensor_value }}</td>
+          <td>{{ r.created_at }}</td>
+          <td class="{{ 'ok' if r.synced else 'warn' }}">{{ 'yes' if r.synced else 'pending' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="warn">No readings yet</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    <div class="card wide">
+      <h2>Rejection log &mdash; what the validator caught</h2>
+      <table>
+        <tr><th>When</th><th>Topic</th><th>Reason</th><th>Payload (escaped)</th></tr>
+        {% for x in rejections %}
+        <tr>
+          <td>{{ x.rejected_at }}</td>
+          <td>{{ x.topic }}</td>
+          <td class="bad">{{ x.reason }}</td>
+          <td><code>{{ x.raw_excerpt }}</code></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="ok">Clean &mdash; nothing rejected yet</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+</body>
+</html>
