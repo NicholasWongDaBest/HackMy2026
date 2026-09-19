@@ -61,8 +61,8 @@
     <div class="card">
       <h2>{{ r.sensor_type }}</h2>
       <div class="big">{{ r.sensor_value }}<span class="unit">
-        {%- if r.sensor_type == 'moisture' %}%
-        {%- elif r.sensor_type == 'temperature' %}&deg;C
+        {%- if r.sensor_type in ('moisture', 'humidity', 'light', 'water_level', 'rainfall') %}%
+        {%- elif r.sensor_type in ('temperature', 'air_temperature') %}&deg;C
         {%- elif r.sensor_type == 'ec' %}&micro;S/cm{% endif -%}
       </span></div>
       <div class="sub" style="margin:6px 0 0">{{ r.created_at }}</div>
@@ -95,7 +95,7 @@
         {{ 'RUNNING' if p.running else 'STOPPED' }}
       </div>
       <div class="sub" style="margin-top:6px">
-        GPIO{{ p.pin }} &middot;
+        ESP32 IO{{ p.pin }} &middot;
         {% if p.running %}
           running {{ p.run_seconds }}s of max {{ status.thresholds.max_run_s }}s
         {% elif p.rest_seconds %}

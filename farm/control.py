@@ -1,9 +1,8 @@
 """The control loop: poll -> store -> decide -> act -> log.
 
-Runs as a background thread inside the Flask app so that exactly one
-process owns the GPIO lines. The dashboard's manual button and the
-automation both act through this module, which is why the physical
-button, the web button and the automation can never fight over the relay.
+Runs as a background thread inside the Flask app. The dashboard and
+automation both act through one bidirectional ESP32 serial link, so no
+second process can steal the port or fight over the relay.
 
 The automation rule, stated plainly so it can be defended to a judge:
 
@@ -14,7 +13,7 @@ The automation rule, stated plainly so it can be defended to a judge:
     The gap between those two thresholds is hysteresis. Without it the
     pump chatters on and off around a single setpoint.
 
-    Overriding everything, in farm/actuator.py:
+    Overriding everything, in farm/actuator.py and the ESP32 firmware:
       * pump runs at most PUMP_MAX_RUN_S
       * pump rests at least PUMP_MIN_REST_S between runs
       * a reading older than READING_STALE_S is not acted on at all
@@ -25,13 +24,14 @@ import logging
 import threading
 import time
 
-from . import actuator, config, database, sensors
+from . import actuator, config, database, node_serial
 
 log = logging.getLogger("control")
 
 
 class Controller:
     def __init__(self):
+        self.link = node_serial.get_link()
         self.hw = actuator.get_hardware()
         self.latest = {}
         self.latest_at = 0.0
@@ -43,17 +43,16 @@ class Controller:
 
     # -- readings -------------------------------------------------------
     def poll_once(self) -> dict:
-        """Read the probe and store one row per measurand. Raises on
-        failure -- a failed read must never become a stored number."""
-        readings = sensors.read_all()
-        for sensor_type, value in readings.items():
-            database.insert_reading(
-                config.SENSOR_POSITION, value, sensor_type
-            )
+        """Take an atomic snapshot of the latest ESP32 sensor readings.
+
+        The serial reader already validates and stores each row as it
+        arrives, so the control loop must not insert duplicates here.
+        """
+        readings, latest_at = self.link.snapshot()
         self.latest = readings
-        self.latest_at = time.time()
+        self.latest_at = latest_at
         self.last_error = None
-        log.info("stored %d readings: %s", len(readings), readings)
+        log.info("using %d ESP32 readings: %s", len(readings), readings)
         return readings
 
     # -- decision -------------------------------------------------------
@@ -155,7 +154,7 @@ class Controller:
     def tick(self):
         try:
             self.poll_once()
-        except sensors.SensorError as exc:
+        except node_serial.NodeSerialError as exc:
             self.last_error = str(exc)
             log.error("sensor read failed: %s", exc)
         except Exception as exc:
@@ -189,6 +188,7 @@ class Controller:
         self.hw.all_stop("loop stopped")
 
     def start(self):
+        self.link.start()
         try:
             self.hw.attach_button(lambda: self.manual("toggle"))
         except Exception as exc:
@@ -201,6 +201,7 @@ class Controller:
         if self._thread:
             self._thread.join(timeout=5)
         self.hw.close()
+        self.link.stop()
 
     # -- for the dashboard ----------------------------------------------
     def status(self) -> dict:

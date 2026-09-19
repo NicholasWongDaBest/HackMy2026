@@ -1,62 +1,47 @@
 /*
- * ESP32 canopy sensor node -- hGroup10 "Save the Farm"
+ * hGroup10 ESP32 sensor and pump node.
  *
- * Reads the Keyestudio KS0567 on-board sensors and emits ONE JSON object
- * per reading, newline-delimited, over USB serial to the Raspberry Pi.
+ * Sensors -> newline-delimited JSON -> Raspberry Pi/MySQL/dashboard.
+ * Raspberry Pi -> PUMP_ON/PUMP_OFF -> ESP32 IO25 -> relay -> pump.
  *
- * Why serial and not WiFi/MQTT:
- *   The Pi is the only thing that talks to Farm Central. This board is a
- *   sensor, not a network peer. A USB cable cannot be knocked off the
- *   venue WiFi, needs no SSID, no broker, no routing between subnets --
- *   and the board is plugged into the Pi for power anyway.
- *
- * Design rules, mirroring farm/sensors.py on the Pi:
- *   - a failed read emits NOTHING. We never substitute a default, a last
- *     known value, or a zero. A missing row is honest; a fake row is not.
- *   - no timestamp is sent. The board has no clock; the Pi stamps rows
- *     with its own time, which is the only clock worth trusting here.
- *   - no delay() in loop(). The sampler is millis()-driven so the board
- *     stays responsive and the interval does not drift with read time.
- *
- * Pin map is the KS0567 factory wiring (see resource/arduino codes).
- * Library: dht11 (resource/arduino codes/libraries/Dht11.zip)
- *
- * Upload: Arduino IDE -> board "ESP32 Dev Module" -> 115200 baud.
+ * The ESP32 has the final 10-second safety cutoff. Even if the Pi or
+ * dashboard fails after PUMP_ON, the relay is returned to OFF.
  */
+#include <Arduino.h>
 #include <dht11.h>
 
-#define DHT11PIN       17   // digital: air temperature + humidity
-#define LIGHTPIN       34   // ADC1: photoresistor
-#define WATERLEVELPIN  33   // ADC1: tank level
-#define RAINWATERPIN   35   // ADC1: steam / rainfall
+#define DHT11PIN       17
+#define LIGHTPIN       34
+#define SOILPIN        32
+#define WATERLEVELPIN  33
+#define RAINWATERPIN   35
+#define RELAYPIN       25
 
-// Must match POLL_INTERVAL_S on the Pi (brief: poll every 1 minute).
 const unsigned long SAMPLE_INTERVAL_MS = 60000UL;
+const unsigned long PUMP_MAX_RUN_MS = 10000UL;
+const char* POSITION = "zone-1";
 
-// Where this board physically sits. Must differ from the RS485 probe's
-// SENSOR_POSITION so the dashboard can tell the two nodes apart.
-const char* POSITION = "zone-2-canopy";
+// The supplied two-channel relay is active-low. If your relay LED is on
+// while the dashboard says STOPPED, change this to false and re-upload.
+const bool RELAY_ACTIVE_LOW = false;
+const uint8_t PUMP_ON_LEVEL = RELAY_ACTIVE_LOW ? LOW : HIGH;
+const uint8_t PUMP_OFF_LEVEL = RELAY_ACTIVE_LOW ? HIGH : LOW;
 
-// ADC is 12-bit on the ESP32: 0..4095 maps to 0..100 %.
 const float ADC_FULL_SCALE = 4095.0;
 
 dht11 DHT11;
 unsigned long lastSample = 0;
+unsigned long pumpStartedAt = 0;
+bool pumpRunning = false;
+String commandBuffer;
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(LIGHTPIN, INPUT);
-  pinMode(WATERLEVELPIN, INPUT);
-  pinMode(RAINWATERPIN, INPUT);
-
-  delay(1500);  // DHT11 needs ~1s after power-up before its first read
-  Serial.println("{\"node\":\"esp32\",\"status\":\"boot\"}");
-  lastSample = millis() - SAMPLE_INTERVAL_MS;  // sample immediately
+float clampPercent(float value) {
+  if (value < 0.0) return 0.0;
+  if (value > 100.0) return 100.0;
+  return value;
 }
 
-// Emit one reading as a JSON object the Pi's validator already accepts:
-//   farm/validation.py -> validate_sensor_message()
-void emit(const char* sensorType, float value) {
+void emitReading(const char* sensorType, float value) {
   Serial.print("{\"sensor_position\":\"");
   Serial.print(POSITION);
   Serial.print("\",\"sensor_type\":\"");
@@ -66,37 +51,104 @@ void emit(const char* sensorType, float value) {
   Serial.println("}");
 }
 
-// Raw ADC counts mean nothing to a judge and nothing to an agronomist.
-// Convert to a percentage of full scale and say so in the units.
-float percentOfFullScale(int raw) {
-  float pct = (raw / ADC_FULL_SCALE) * 100.0;
-  if (pct < 0.0)   pct = 0.0;
-  if (pct > 100.0) pct = 100.0;
-  return pct;
+void reportPump(const char* reason) {
+  Serial.print("{\"type\":\"pump\",\"state\":\"");
+  Serial.print(pumpRunning ? "on" : "off");
+  Serial.print("\",\"reason\":\"");
+  Serial.print(reason);
+  Serial.println("\"}");
+}
+
+void setPump(bool turnOn, const char* reason) {
+  digitalWrite(RELAYPIN, turnOn ? PUMP_ON_LEVEL : PUMP_OFF_LEVEL);
+  pumpRunning = turnOn;
+  if (turnOn) pumpStartedAt = millis();
+  reportPump(reason);
+}
+
+void handleCommand(String command) {
+  command.trim();
+  command.toUpperCase();
+
+  if (command == "PUMP_ON") {
+    setPump(true, "command");
+  } else if (command == "PUMP_OFF") {
+    setPump(false, "command");
+  } else if (command == "PUMP_STATUS") {
+    reportPump("status_request");
+  } else if (command.length() > 0) {
+    Serial.print("{\"type\":\"error\",\"message\":\"unknown command: ");
+    Serial.print(command);
+    Serial.println("\"}");
+  }
+}
+
+void readCommands() {
+  while (Serial.available() > 0) {
+    char received = Serial.read();
+    if (received == '\n' || received == '\r') {
+      if (commandBuffer.length() > 0) {
+        handleCommand(commandBuffer);
+        commandBuffer = "";
+      }
+    } else if (commandBuffer.length() < 50) {
+      commandBuffer += received;
+    }
+  }
 }
 
 void sampleAndReport() {
-  // --- DHT11: digital, and it fails often enough to matter ------------
-  int chk = DHT11.read(DHT11PIN);
-  if (chk == 0) {                       // DHTLIB_OK
-    emit("air_temperature", (float)DHT11.temperature);
-    emit("humidity",        (float)DHT11.humidity);
+  int dhtResult = DHT11.read(DHT11PIN);
+  if (dhtResult == DHTLIB_OK) {
+    emitReading("temperature", (float)DHT11.temperature);
+    emitReading("humidity", (float)DHT11.humidity);
   } else {
-    // Checksum or timeout. Report the fault, emit no reading.
-    Serial.print("{\"node\":\"esp32\",\"error\":\"dht11 read failed, code ");
-    Serial.print(chk);
+    Serial.print("{\"type\":\"error\",\"message\":\"DHT11 read failed: ");
+    Serial.print(dhtResult);
     Serial.println("\"}");
   }
 
-  // --- Analog channels ------------------------------------------------
-  emit("light",       percentOfFullScale(analogRead(LIGHTPIN)));
-  emit("water_level", percentOfFullScale(analogRead(WATERLEVELPIN)));
-  emit("rainfall",    percentOfFullScale(analogRead(RAINWATERPIN)));
+  float light = clampPercent((analogRead(LIGHTPIN) / ADC_FULL_SCALE) * 100.0);
+  float moisture = clampPercent(
+      (analogRead(SOILPIN) / ADC_FULL_SCALE) * 100.0 * 2.3);
+  float waterLevel = clampPercent(
+      (analogRead(WATERLEVELPIN) / ADC_FULL_SCALE) * 100.0 * 2.5);
+  float rainfall = clampPercent(
+      (analogRead(RAINWATERPIN) / ADC_FULL_SCALE) * 100.0);
+
+  emitReading("light", light);
+  emitReading("moisture", moisture);
+  emitReading("water_level", waterLevel);
+  emitReading("rainfall", rainfall);
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(DHT11PIN, INPUT);
+  pinMode(LIGHTPIN, INPUT);
+  pinMode(SOILPIN, INPUT);
+  pinMode(WATERLEVELPIN, INPUT);
+  pinMode(RAINWATERPIN, INPUT);
+
+  pinMode(RELAYPIN, OUTPUT);
+  digitalWrite(RELAYPIN, PUMP_OFF_LEVEL);
+
+  delay(1500);
+  Serial.println("{\"type\":\"system\",\"status\":\"ready\"}");
+  reportPump("boot");
+
+  lastSample = millis() - SAMPLE_INTERVAL_MS;
 }
 
 void loop() {
+  readCommands();
+
   unsigned long now = millis();
-  // Subtraction handles the ~49-day millis() rollover correctly.
+  if (pumpRunning && now - pumpStartedAt >= PUMP_MAX_RUN_MS) {
+    setPump(false, "safety_timeout");
+  }
+
   if (now - lastSample >= SAMPLE_INTERVAL_MS) {
     lastSample = now;
     sampleAndReport();

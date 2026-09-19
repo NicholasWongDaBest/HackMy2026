@@ -22,7 +22,7 @@ sudo apt update
 sudo apt install -y mariadb-server python3-pip python3-venv mosquitto-clients subversion
 pip3 install --break-system-packages -r requirements.txt
 ```
-Check: `python3 -c "import pymodbus, gpiozero, flask, mysql.connector; print('ok')"`
+Check: `python3 -c "import serial, flask, mysql.connector; print('ok')"`
 
 ## 2. Database
 
@@ -35,29 +35,28 @@ Check: `mysql -u farm -pfarm farm_local -e "SHOW TABLES; DESCRIBE sensor_data;"`
 You should see sensor_data, selfcare_message, rejected_messages, sync_log,
 automation_log and the `sensor` view.
 
-## 3. Find the sensor
+## 3. Find the ESP32 USB serial port
 
 ```
-ls /dev/ttyUSB*                       # expect /dev/ttyUSB0
+ls -l /dev/serial/by-id/              # preferred stable device name
+ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 sudo usermod -aG dialout $USER        # then log out and back in
-python3 tools/sensor_scan.py /dev/ttyUSB0 9600
+export NODE_SERIAL_PORT=/dev/ttyUSB0  # replace with the detected path
+export NODE_SERIAL_BAUD=9600
+python3 -m farm.node_serial
 ```
-Read the dump. Identify which register looks like moisture (0-100 after
-/10), temperature (~20-35 after /10) and EC (hundreds to low thousands).
+Press ESP32 RESET. The worker should log stored sensor values. Stop it
+with Ctrl+C before starting the dashboard; the dashboard owns this same
+serial connection during normal operation.
 
-**Then correct `SENSOR_REGISTERS` in farm/config.py to match.** If nothing
-answers, try baud 4800 and 19200 before suspecting the probe.
-
-Check: `python3 -m farm.sensors` prints three plausible numbers.
-
-## 4. Relay self-test — no water yet
+## 4. Relay self-test - no water yet
 
 ```
 python3 -m farm.actuator
 ```
-You should hear each relay click on for 1.5 s. If a relay clicks
-*inverted* (energised at rest), set `RELAY_ACTIVE_HIGH=1` in the
-environment.
+You should hear the ESP32-controlled relay click on for 1.5 s. If it is
+energised at rest, change `RELAY_ACTIVE_LOW` in
+`firmware/esp32_node/esp32_node.ino`, re-upload, and test again.
 
 **Only put the pump in water once this passes.**
 
@@ -69,12 +68,11 @@ python3 -m farm.app
 Open `http://192.168.200.20:5000` from the laptop.
 
 Check, in order:
-- three live sensor tiles showing real numbers
-- "Pump 1" card says STOPPED
+- live sensor tiles showing real numbers from the ESP32
+- "Pump 1" card says STOPPED and ESP32 IO25
 - press **Pump ON** — relay clicks, pump runs, card flips to RUNNING
-- wait 30 s — safety cutoff stops it on its own, automation log shows
-  `pump_off / safety / max runtime 30s exceeded`
-- press the physical button — pump toggles
+- wait 10 s — safety cutoff stops it on its own, automation log shows
+  `pump_off / safety / max runtime 10s exceeded`
 - dry the probe (lift it out of the soil) and wait one tick — automation
   log shows `pump_on / auto / moisture N% below threshold 30%`
 

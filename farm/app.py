@@ -1,9 +1,8 @@
 """Dashboard and manual irrigation control.
 
 The control loop runs as a thread inside this process (see farm/control.py)
-so that one process owns the GPIO lines. That is why the manual pump
-button on this page actually moves the relay instead of posting into the
-void.
+so that one process owns the ESP32 USB serial link. That is why the manual
+pump button can send a command without fighting a separate serial reader.
 
 Jinja autoescaping is ON for .html templates, so anything rendered from
 the database -- including a selfcare message containing <script> -- is
@@ -42,7 +41,7 @@ def dashboard():
         live=database.latest_per_sensor(),
         status=ctl.status(),
         decisions=database.recent_decisions(10),
-        position=config.SENSOR_POSITION,
+        position=config.NODE_POSITION,
     )
 
 

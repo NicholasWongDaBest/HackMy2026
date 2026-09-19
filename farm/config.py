@@ -80,15 +80,10 @@ SENSOR_REGISTERS = {
     "ec":          (0x0002, 1.0, False),   # uS/cm
 }
 
-# ---- GPIO --------------------------------------------------------------
-# 2-channel relay module is ACTIVE LOW: driving the pin low energises the
-# coil. gpiozero handles this via active_high=False.
-PUMP_PINS = {
-    1: int(os.getenv("PUMP1_PIN", "17")),
-    2: int(os.getenv("PUMP2_PIN", "27")),
-}
-RELAY_ACTIVE_HIGH = os.getenv("RELAY_ACTIVE_HIGH", "0") == "1"
-BUTTON_PIN = int(os.getenv("BUTTON_PIN", "26"))
+# ---- Pump output -------------------------------------------------------
+# The relay is wired to the ESP32, not directly to Raspberry Pi GPIO.
+# This value is displayed on the dashboard; the ESP32 firmware owns it.
+PUMP_PINS = {1: int(os.getenv("ESP32_PUMP_PIN", "25"))}
 
 # ---- Polling and automation -------------------------------------------
 POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "60"))   # brief: every 1 minute
@@ -101,7 +96,7 @@ MOISTURE_OFF_ABOVE = float(os.getenv("MOISTURE_OFF_ABOVE", "45.0"))
 
 # Safety envelope. These bound the automation regardless of what the
 # sensor claims -- a stuck-low probe must not run the pump forever.
-PUMP_MAX_RUN_S  = int(os.getenv("PUMP_MAX_RUN_S", "30"))
+PUMP_MAX_RUN_S  = int(os.getenv("PUMP_MAX_RUN_S", "10"))
 PUMP_MIN_REST_S = int(os.getenv("PUMP_MIN_REST_S", "60"))
 
 # Refuse to irrigate on a reading older than this (sensor died mid-run).
@@ -110,17 +105,16 @@ READING_STALE_S = int(os.getenv("READING_STALE_S", "180"))
 
 # ---- ESP32 sensor node (USB serial) ------------------------------------
 # The kit's analog sensors cannot connect to the Pi: a Raspberry Pi has no
-# ADC. The ESP32 has one, so it reads them and streams JSON over USB.
-# The RS485 adapter usually takes /dev/ttyUSB0 and the board /dev/ttyUSB1,
-# but that order depends on plug-in sequence -- pin it down with a stable
-# name from /dev/serial/by-id/ before the demo.
-NODE_SERIAL_PORT = os.getenv("NODE_SERIAL_PORT", "/dev/ttyUSB1")
-NODE_SERIAL_BAUD = int(os.getenv("NODE_SERIAL_BAUD", "115200"))
+# ADC. The ESP32 reads them and streams newline-delimited JSON over USB.
+# Prefer a stable /dev/serial/by-id/... path when one is available.
+NODE_SERIAL_PORT = os.getenv("NODE_SERIAL_PORT", "/dev/ttyUSB0")
+NODE_SERIAL_BAUD = int(os.getenv("NODE_SERIAL_BAUD", "9600"))
+NODE_POSITION = os.getenv("NODE_POSITION", "zone-1")
 
 # Physical plausibility for the node's channels. Anything outside these
 # is corrupt data, not a measurement -- same rule as the RS485 probe.
 SENSOR_RANGES.update({
-    "air_temperature": (-40.0, 80.0),   # degC, DHT11 spec is 0..50
+    "air_temperature": (-40.0, 80.0),   # accepted legacy name
     "light":           (0.0, 100.0),    # % of full scale
     "water_level":     (0.0, 100.0),    # % of full scale
     "rainfall":        (0.0, 100.0),    # % of full scale

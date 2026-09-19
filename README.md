@@ -11,6 +11,8 @@ syncs to Farm Central, and refuses to be fooled by what it receives.
     farm/mqtt_client.py   subscriber + self-verification publisher
     farm/sync.py          Pi -> central sync worker (survives LAN loss)
     farm/app.py           Flask dashboard
+    farm/node_serial.py   one bidirectional ESP32 USB connection
+    farm/actuator.py      safe PUMP_ON/PUMP_OFF commands to ESP32
     farm/db/*.sql         local + central schema
     tools/preflight.sh    connectivity check -- RUN THIS FIRST
     tools/attack_test.py  fires hostile payloads at our own validator
@@ -32,9 +34,13 @@ syncs to Farm Central, and refuses to be fooled by what it receives.
 ## Run
 
     bash tools/preflight.sh          # can we even reach central?
+    export NODE_SERIAL_PORT=/dev/ttyUSB0
     python3 -m farm.mqtt_client      # terminal 1
     python3 -m farm.sync             # terminal 2
     python3 -m farm.app              # terminal 3 -> http://<pi-ip>:5000
+
+`farm.app` owns the ESP32 serial connection. Do not run
+`python3 -m farm.node_serial` at the same time.
 
 ## Prove it can't be fooled
 
