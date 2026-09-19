@@ -63,7 +63,7 @@ SYNC_BATCH = 200              # rows pushed per cycle
 # differs between vendors -- run tools/sensor_scan.py FIRST and correct
 # SENSOR_REGISTERS below to match what actually comes back.
 RS485_PORT   = os.getenv("RS485_PORT", "/dev/ttyUSB0")
-RS485_BAUD   = int(os.getenv("RS485_BAUD", "9600"))
+RS485_BAUD   = int(os.getenv("RS485_BAUD", "4800"))   # measured, not assumed
 RS485_SLAVE  = int(os.getenv("RS485_SLAVE", "1"))
 RS485_FUNC   = os.getenv("RS485_FUNC", "holding")      # holding | input
 RS485_TIMEOUT = float(os.getenv("RS485_TIMEOUT", "1.0"))
@@ -110,12 +110,13 @@ READING_STALE_S = int(os.getenv("READING_STALE_S", "180"))
 
 # ---- ESP32 sensor node (USB serial) ------------------------------------
 # The kit's analog sensors cannot connect to the Pi: a Raspberry Pi has no
-# ADC. The ESP32 has one, so it reads them and streams JSON over USB.
-# The RS485 adapter usually takes /dev/ttyUSB0 and the board /dev/ttyUSB1,
-# but that order depends on plug-in sequence -- pin it down with a stable
-# name from /dev/serial/by-id/ before the demo.
+# ADC. The ESP32 reads them and streams newline-delimited JSON over USB.
+# Prefer a stable /dev/serial/by-id/... path when one is available.
+# ttyUSB0 is the RS485 adapter. Pin BOTH to /dev/serial/by-id/... paths
+# before the demo: plug order decides the numbering on every reboot.
 NODE_SERIAL_PORT = os.getenv("NODE_SERIAL_PORT", "/dev/ttyUSB1")
-NODE_SERIAL_BAUD = int(os.getenv("NODE_SERIAL_BAUD", "115200"))
+NODE_SERIAL_BAUD = int(os.getenv("NODE_SERIAL_BAUD", "9600"))
+NODE_POSITION = os.getenv("NODE_POSITION", "zone-2-canopy")
 
 # Physical plausibility for the node's channels. Anything outside these
 # is corrupt data, not a measurement -- same rule as the RS485 probe.
@@ -126,16 +127,5 @@ SENSOR_RANGES.update({
     "rainfall":        (0.0, 100.0),    # % of full scale
 })
 
-
-# ---- Pump backend ------------------------------------------------------
-# "esp"  : relay lives on the ESP32 (KS0567 io25), commanded over serial.
-#          The board runs its own watchdog, so a lost cable stops the pump.
-# "gpio" : relay wired straight to the Pi's own pins (PUMP_PINS above).
-PUMP_BACKEND = os.getenv("PUMP_BACKEND", "esp")
-
-ESP_RELAY_PIN = int(os.getenv("ESP_RELAY_PIN", "25"))   # KS0567 relay pin
-
-# How often the Pi re-sends "still on" while irrigating. Must be well
-# under the board's COMMAND_TIMEOUT_MS (5s) or the watchdog will cut in
-# during normal operation.
-ESP_KEEPALIVE_S = float(os.getenv("ESP_KEEPALIVE_S", "1.0"))
+# Central's table, discovered by inspecting the live schema.
+CENTRAL_TABLE = os.getenv("CENTRAL_TABLE", "Sensor_data_team10")

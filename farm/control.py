@@ -25,7 +25,7 @@ import logging
 import threading
 import time
 
-from . import actuator, config, database, sensors
+from . import actuator, config, database, node_serial, sensors
 
 log = logging.getLogger("control")
 
@@ -35,6 +35,11 @@ class Controller:
         self.hw = actuator.get_hardware()
         self.latest = {}
         self.latest_at = 0.0
+        # The ESP32's own channels, kept for display only. They never
+        # take part in the irrigation decision.
+        self.node_latest = {}
+        self.node_latest_at = 0.0
+        self.node_error = None
         self.last_error = None
         self.last_decision = None
         self._thread = None
@@ -43,17 +48,35 @@ class Controller:
 
     # -- readings -------------------------------------------------------
     def poll_once(self) -> dict:
-        """Read the probe and store one row per measurand. Raises on
-        failure -- a failed read must never become a stored number."""
+        """Read the RS485 probe and store one row per measurand.
+
+        The probe is the decision source: it reports calibrated moisture,
+        temperature and EC, so the number the automation fires on needs no
+        scaling factor anyone would have to justify to a judge. Raises on
+        failure -- a failed read must never become a stored number.
+
+        The ESP32's channels are collected separately. Its serial reader
+        already validates and stores each row as it arrives, so they are
+        only snapshotted here for the dashboard, never inserted twice and
+        never fed into decide().
+        """
         readings = sensors.read_all()
         for sensor_type, value in readings.items():
-            database.insert_reading(
-                config.SENSOR_POSITION, value, sensor_type
-            )
+            database.insert_reading(config.SENSOR_POSITION, value, sensor_type)
         self.latest = readings
         self.latest_at = time.time()
         self.last_error = None
-        log.info("stored %d readings: %s", len(readings), readings)
+        log.info("stored %d probe readings: %s", len(readings), readings)
+
+        try:
+            self.node_latest, self.node_latest_at = self.link.snapshot()
+            self.node_error = None
+        except node_serial.NodeSerialError as exc:
+            # The node being quiet is not a reason to stop irrigating:
+            # the probe is what the decision depends on.
+            self.node_latest, self.node_latest_at = {}, 0.0
+            self.node_error = str(exc)
+
         return readings
 
     # -- decision -------------------------------------------------------
@@ -65,10 +88,6 @@ class Controller:
         cutoff = pump.enforce_max_runtime()
         if cutoff:
             return "pump_off", cutoff, "safety"
-
-        if time.time() < self._manual_until:
-            remaining = self._manual_until - time.time()
-            return "hold", f"manual override active ({remaining:.0f}s left)", "manual"
 
         if not self.latest:
             return "hold", "no sensor reading yet", "auto"
@@ -127,21 +146,29 @@ class Controller:
             log.exception("could not write automation_log")
 
     # -- manual override ------------------------------------------------
-    def manual(self, action: str, hold_s: int = 120) -> tuple:
-        """Web or physical button. Suspends the automation for hold_s so a
-        judge pressing the button sees the pump respond and stay responded,
-        instead of the next automation tick immediately undoing it."""
+    def manual(self, action: str) -> tuple:
+        """The dashboard's ON/OFF buttons. Deliberately no override timer.
+
+        Pressing ON re-sends the command even when the pump is already
+        running, which restarts the board's safety window. So pressing ON
+        again is how you irrigate for longer -- previously it silently
+        extended a countdown that nothing visible explained.
+
+        Nothing is needed to stop the automation fighting the button:
+        after any stop, PUMP_MIN_REST_S already blocks an automatic
+        restart, and while the pump is running the automation's only
+        options are "hold" or "stop".
+        """
         pump = self.hw.pump(1)
         if action == "on":
-            ok, reason = pump.start()
+            ok, reason = pump.start(force=True)
         elif action == "off":
             ok, reason = pump.stop("manual stop")
         elif action == "toggle":
-            return self.manual("off" if pump.running else "on", hold_s)
+            return self.manual("off" if pump.running else "on")
         else:
             return False, f"unknown action '{action}'"
 
-        self._manual_until = time.time() + hold_s
         database.log_decision(
             f"pump_{action}", f"manual: {reason}", "manual",
             self.latest, pump.running,
@@ -157,7 +184,7 @@ class Controller:
             self.poll_once()
         except sensors.SensorError as exc:
             self.last_error = str(exc)
-            log.error("sensor read failed: %s", exc)
+            log.error("probe read failed: %s", exc)
         except Exception as exc:
             self.last_error = str(exc)
             log.exception("poll failed")
@@ -208,6 +235,12 @@ class Controller:
             "readings": self.latest,
             "reading_age_s": round(time.time() - self.latest_at, 1) if self.latest_at else None,
             "sensor_error": self.last_error,
+            "node_readings": self.node_latest,
+            "node_age_s": (
+                round(time.time() - self.node_latest_at, 1)
+                if self.node_latest_at else None
+            ),
+            "node_error": self.node_error,
             "pumps": self.hw.state(),
             "last_decision": self.last_decision,
             "manual_override_s": max(0, round(self._manual_until - time.time())),

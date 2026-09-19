@@ -5,40 +5,41 @@
  *   1. read the kit's on-board sensors and stream them to the Pi as JSON
  *   2. drive the irrigation relay on command from the Pi
  *
- * Link: newline-delimited JSON over USB serial, 115200 baud.
+ * DIVISION OF LABOUR
+ * The Raspberry Pi owns the irrigation decision and reads the RS485 soil
+ * probe itself -- that probe reports calibrated moisture, temperature and
+ * EC, so nothing here needs a scaling factor to make it look right.
+ * This board contributes the channels the Pi physically cannot read (it
+ * has no ADC) and drives the relay on command.
  *
- * WHY THE WATCHDOG MATTERS
- * The Pi decides when to irrigate, but the Pi cannot stop a pump it has
- * lost the cable to. So this board refuses to run the relay on trust:
- *   - it stops after PUMP_MAX_RUN_MS no matter what the Pi says
- *   - it stops if no command has arrived for COMMAND_TIMEOUT_MS
- * The Pi therefore has to keep saying "still on" every second. Pull the
- * USB cable mid-irrigation and the pump shuts itself off within 5s.
- *
- * Other rules, mirroring app/sensors.py on the Pi:
- *   - a failed sensor read emits NOTHING; never a default, never a zero
- *   - no timestamp is sent; the board has no clock, the Pi stamps rows
- *   - no delay() in loop(), so commands are never blocked behind sampling
- *
- * Library: dht11 (resource/arduino codes/libraries/Dht11.zip)
- * Upload:  Arduino IDE -> board "ESP32 Dev Module" -> 115200 baud
+ * SAFETY
+ * The ESP32 has the final 10-second cutoff. Even if the Pi or dashboard
+ * fails after PUMP_ON, the relay is returned to OFF. Because the cap
+ * applies from the moment the pump starts, a lost USB cable cannot leave
+ * the pump running for more than PUMP_MAX_RUN_MS either -- no keepalive
+ * from the Pi is required.
  */
 #include <dht11.h>
 
-// ---- KS0567 pin map (from the Keyestudio assembly guide) --------------
-#define DHT11PIN       17   // digital: air temperature + humidity
-#define LIGHTPIN       34   // ADC1: photoresistor
-#define WATERLEVELPIN  33   // ADC1: tank level
-#define RAINWATERPIN   35   // ADC1: steam / rainfall
-#define RELAYPIN       25   // water pump relay
+#define DHT11PIN       17
+#define LIGHTPIN       34
+#define WATERLEVELPIN  33
+#define RAINWATERPIN   35
+#define RELAYPIN       25
+// Soil moisture is deliberately NOT read here. The RS485 probe on the Pi
+// owns that measurand and reports real percent, so the kit's analog pin
+// would only add a second, uncalibrated "moisture" to argue with.
 
-// The KS0567 on-board relay energises on HIGH (matches the kit's own
-// sample sketches). Set false if you swap in an active-low module.
-const bool RELAY_ACTIVE_HIGH = true;
+const unsigned long SAMPLE_INTERVAL_MS = 60000UL;
+const unsigned long PUMP_MAX_RUN_MS = 10000UL;
+const char* POSITION = "zone-2-canopy";   // distinct from the probe's zone-1
 
-const unsigned long SAMPLE_INTERVAL_MS = 60000UL;  // matches POLL_INTERVAL_S
-const unsigned long PUMP_MAX_RUN_MS    = 30000UL;  // matches PUMP_MAX_RUN_S
-const unsigned long COMMAND_TIMEOUT_MS =  5000UL;  // link-loss cutoff
+// This board's relay energises on HIGH, so RELAY_ACTIVE_LOW stays false.
+// If the relay LED is on while the dashboard says STOPPED, the module is
+// wired the other way round -- set this true and re-upload.
+const bool RELAY_ACTIVE_LOW = false;
+const uint8_t PUMP_ON_LEVEL = RELAY_ACTIVE_LOW ? LOW : HIGH;
+const uint8_t PUMP_OFF_LEVEL = RELAY_ACTIVE_LOW ? HIGH : LOW;
 
 const char* POSITION = "zone-2-canopy";
 const float ADC_FULL_SCALE = 4095.0;
@@ -55,39 +56,13 @@ void relayWrite(bool on) {
   digitalWrite(RELAYPIN, (on == RELAY_ACTIVE_HIGH) ? HIGH : LOW);
 }
 
-void reportPump(const char* reason) {
-  Serial.print("{\"node\":\"esp32\",\"pump\":\"");
-  Serial.print(pumpOn ? "on" : "off");
-  Serial.print("\",\"reason\":\"");
-  Serial.print(reason);
-  Serial.println("\"}");
+// Percent of ADC full scale, and nothing else. No multiplier: a number we
+// cannot explain the origin of is worse than a raw one we can.
+float percentOfFullScale(int raw) {
+  return clampPercent((raw / ADC_FULL_SCALE) * 100.0);
 }
 
-void setPump(bool on, const char* reason) {
-  if (on == pumpOn) return;          // nothing to do, stay quiet
-  pumpOn = on;
-  relayWrite(pumpOn);
-  if (pumpOn) pumpStartedMs = millis();
-  reportPump(reason);
-}
-
-// ---- commands from the Pi --------------------------------------------
-// Deliberately string matching rather than a JSON parser: one message
-// shape, no extra library, and nothing to go wrong on a noisy line.
-void handleCommand(String line) {
-  if (line.indexOf("\"cmd\":\"pump\"") < 0) return;
-
-  lastCommandMs = millis();          // any pump command refreshes the watchdog
-
-  if (line.indexOf("\"state\":\"on\"") >= 0) {
-    setPump(true, "commanded");
-  } else if (line.indexOf("\"state\":\"off\"") >= 0) {
-    setPump(false, "commanded");
-  }
-}
-
-// ---- sensors ----------------------------------------------------------
-void emit(const char* sensorType, float value) {
+void emitReading(const char* sensorType, float value) {
   Serial.print("{\"sensor_position\":\"");
   Serial.print(POSITION);
   Serial.print("\",\"sensor_type\":\"");
@@ -106,19 +81,21 @@ float percentOfFullScale(int raw) {
 }
 
 void sampleAndReport() {
-  int chk = DHT11.read(DHT11PIN);
-  if (chk == 0) {                    // DHTLIB_OK
-    emit("air_temperature", (float)DHT11.temperature);
-    emit("humidity",        (float)DHT11.humidity);
+  // A failed read emits NOTHING. Never a default, never a zero: a missing
+  // row is honest, a fabricated one is not.
+  int dhtResult = DHT11.read(DHT11PIN);
+  if (dhtResult == DHTLIB_OK) {
+    emitReading("air_temperature", (float)DHT11.temperature);
+    emitReading("humidity", (float)DHT11.humidity);
   } else {
     Serial.print("{\"node\":\"esp32\",\"error\":\"dht11 read failed, code ");
     Serial.print(chk);
     Serial.println("\"}");
   }
 
-  emit("light",       percentOfFullScale(analogRead(LIGHTPIN)));
-  emit("water_level", percentOfFullScale(analogRead(WATERLEVELPIN)));
-  emit("rainfall",    percentOfFullScale(analogRead(RAINWATERPIN)));
+  emitReading("light",       percentOfFullScale(analogRead(LIGHTPIN)));
+  emitReading("water_level", percentOfFullScale(analogRead(WATERLEVELPIN)));
+  emitReading("rainfall",    percentOfFullScale(analogRead(RAINWATERPIN)));
 }
 
 // ---- watchdog ---------------------------------------------------------
