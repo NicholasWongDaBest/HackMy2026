@@ -70,6 +70,8 @@ def handle_broadcast(raw: bytes) -> None:
 
 def handle_test(client, raw: bytes) -> None:
     data = validation.parse_json(raw) if raw.strip().startswith(b"{") else {}
+    if data.get("ack") is True:
+        return
     log.info("test message: %s", raw[:120])
     client.publish(
         config.TOPIC_TEST,

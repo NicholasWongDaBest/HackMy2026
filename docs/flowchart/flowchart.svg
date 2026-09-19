@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="1300" viewBox="0 0 980 1300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<defs>
+  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+  </marker>
+</defs>
+<style>
+  .term { fill:#1f3a5f; }
+  .proc { fill:#eef3fb; stroke:#5b7fb5; stroke-width:1.6; }
+  .dec  { fill:#fff8e6; stroke:#c99a26; stroke-width:1.6; }
+  .stop { fill:#fdeaea; stroke:#c0392b; stroke-width:1.6; }
+  .go   { fill:#e8f7ec; stroke:#2e8b57; stroke-width:1.6; }
+  .hold { fill:#f0f0f3; stroke:#7a7a85; stroke-width:1.6; }
+  .t    { font-size:14px; fill:#1a1a1a; }
+  .tw   { font-size:14px; fill:#ffffff; font-weight:600; }
+  .sm   { font-size:12px; fill:#555; }
+  .lbl  { font-size:12px; fill:#c0392b; font-weight:600; }
+  .lblg { font-size:12px; fill:#2e8b57; font-weight:600; }
+  line, path.ln { stroke:#333; stroke-width:1.6; fill:none; marker-end:url(#a); }
+</style>
+
+<text x="30" y="34" font-size="19" font-weight="700" fill="#1a1a1a">Irrigation automation logic</text>
+<text x="30" y="55" class="sm">hGroup10 &#183; farm/control.py &#183; one pass every 60 s</text>
+
+<!-- START -->
+<rect class="term" x="230" y="78" width="220" height="50" rx="25"/>
+<text x="340" y="109" class="tw" text-anchor="middle">Tick &#183; every 60 s</text>
+<line x1="340" y1="128" x2="340" y2="157"/>
+
+<!-- READ -->
+<rect class="proc" x="190" y="158" width="300" height="56" rx="6"/>
+<text x="340" y="182" class="t" text-anchor="middle">Read RS485 probe (Modbus RTU)</text>
+<text x="340" y="200" class="sm" text-anchor="middle">moisture &#183; temperature &#183; EC</text>
+<line x1="340" y1="214" x2="340" y2="243"/>
+
+<!-- READ OK? -->
+<polygon class="dec" points="340,244 470,289 340,334 210,289"/>
+<text x="340" y="294" class="t" text-anchor="middle">Read succeeded?</text>
+<line x1="470" y1="289" x2="637" y2="289"/>
+<text x="500" y="282" class="lbl">no</text>
+<rect class="stop" x="640" y="259" width="270" height="60" rx="6"/>
+<text x="775" y="282" class="t" text-anchor="middle">Log sensor fault</text>
+<text x="775" y="301" class="sm" text-anchor="middle">pump OFF &#183; never store a fake value</text>
+<line x1="340" y1="334" x2="340" y2="363"/>
+<text x="352" y="352" class="lblg">yes</text>
+
+<!-- STORE -->
+<rect class="proc" x="190" y="364" width="300" height="56" rx="6"/>
+<text x="340" y="388" class="t" text-anchor="middle">INSERT 3 rows &#8594; sensor_data</text>
+<text x="340" y="406" class="sm" text-anchor="middle">sensor_position, sensor_value, created_at</text>
+<line x1="340" y1="420" x2="340" y2="449"/>
+
+<!-- MAX RUNTIME -->
+<polygon class="dec" points="340,450 470,495 340,540 210,495"/>
+<text x="340" y="492" class="t" text-anchor="middle">Pump running</text>
+<text x="340" y="509" class="t" text-anchor="middle">longer than 30 s?</text>
+<line x1="470" y1="495" x2="637" y2="495"/>
+<text x="500" y="488" class="lbl">yes</text>
+<rect class="stop" x="640" y="465" width="270" height="60" rx="6"/>
+<text x="775" y="488" class="t" text-anchor="middle">STOP PUMP &#8212; safety cutoff</text>
+<text x="775" y="507" class="sm" text-anchor="middle">overrides every other rule</text>
+<line x1="340" y1="540" x2="340" y2="569"/>
+<text x="352" y="558" class="lblg">no</text>
+
+<!-- MANUAL -->
+<polygon class="dec" points="340,570 470,615 340,660 210,615"/>
+<text x="340" y="620" class="t" text-anchor="middle">Manual override active?</text>
+<line x1="470" y1="615" x2="637" y2="615"/>
+<text x="500" y="608" class="lbl">yes</text>
+<rect class="hold" x="640" y="585" width="270" height="60" rx="6"/>
+<text x="775" y="608" class="t" text-anchor="middle">HOLD &#8212; operator in control</text>
+<text x="775" y="627" class="sm" text-anchor="middle">button or dashboard &#183; 120 s</text>
+<line x1="340" y1="660" x2="340" y2="689"/>
+<text x="352" y="678" class="lblg">no</text>
+
+<!-- STALE -->
+<polygon class="dec" points="340,690 470,735 340,780 210,735"/>
+<text x="340" y="732" class="t" text-anchor="middle">Newest reading</text>
+<text x="340" y="749" class="t" text-anchor="middle">older than 180 s?</text>
+<line x1="470" y1="735" x2="637" y2="735"/>
+<text x="500" y="728" class="lbl">yes</text>
+<rect class="stop" x="640" y="705" width="270" height="60" rx="6"/>
+<text x="775" y="728" class="t" text-anchor="middle">STOP PUMP &#8212; fail safe</text>
+<text x="775" y="747" class="sm" text-anchor="middle">do not irrigate on blind data</text>
+<line x1="340" y1="780" x2="340" y2="809"/>
+<text x="352" y="798" class="lblg">no</text>
+
+<!-- MOISTURE LOW? -->
+<polygon class="dec" points="340,810 470,855 340,900 210,855"/>
+<text x="340" y="860" class="t" text-anchor="middle">moisture &lt; 30 %?</text>
+
+<!-- yes -> left to rest check -->
+<path class="ln" d="M210,855 L140,855 L140,924"/>
+<text x="148" y="848" class="lblg">yes</text>
+<polygon class="dec" points="140,925 240,962 140,999 40,962"/>
+<text x="140" y="959" class="t" text-anchor="middle">Rested</text>
+<text x="140" y="976" class="t" text-anchor="middle">&#8805; 60 s?</text>
+<line x1="140" y1="999" x2="140" y2="1043"/>
+<text x="150" y="1026" class="lblg">yes</text>
+<rect class="go" x="45" y="1044" width="190" height="56" rx="6"/>
+<text x="140" y="1068" class="t" text-anchor="middle" font-weight="600">START PUMP</text>
+<text x="140" y="1086" class="sm" text-anchor="middle">soil is dry</text>
+
+<!-- rest check no -> hold -->
+<path class="ln" d="M240,962 L300,962 L300,1044"/>
+<text x="248" y="955" class="lbl">no</text>
+
+<!-- no -> moisture high? -->
+<line x1="340" y1="900" x2="340" y2="924"/>
+<text x="352" y="918" class="lbl">no</text>
+<polygon class="dec" points="450,925 560,962 450,999 340,962"/>
+<line x1="340" y1="924" x2="340" y2="962" marker-end="none" stroke="#333" stroke-width="1.6"/>
+<text x="450" y="967" class="t" text-anchor="middle">moisture &gt; 45 %?</text>
+<line x1="560" y1="962" x2="637" y2="962"/>
+<text x="580" y="955" class="lbl">yes</text>
+<rect class="stop" x="640" y="932" width="270" height="60" rx="6"/>
+<text x="775" y="955" class="t" text-anchor="middle">STOP PUMP</text>
+<text x="775" y="974" class="sm" text-anchor="middle">target moisture reached</text>
+<path class="ln" d="M450,999 L450,1020 L395,1020 L395,1044"/>
+<text x="458" y="1016" class="lblg">no</text>
+
+<!-- HOLD box -->
+<rect class="hold" x="265" y="1044" width="260" height="56" rx="6"/>
+<text x="395" y="1068" class="t" text-anchor="middle" font-weight="600">HOLD current state</text>
+<text x="395" y="1086" class="sm" text-anchor="middle">inside hysteresis band / still resting</text>
+
+<!-- converge to log -->
+<path class="ln" d="M140,1100 L140,1140 L340,1140 L340,1168"/>
+<path class="ln" d="M395,1100 L395,1140 L340,1140 L340,1168"/>
+<rect class="proc" x="190" y="1169" width="300" height="56" rx="6"/>
+<text x="340" y="1193" class="t" text-anchor="middle">Write row &#8594; automation_log</text>
+<text x="340" y="1211" class="sm" text-anchor="middle">decision, reason, readings, pump state</text>
+<line x1="340" y1="1225" x2="340" y2="1252"/>
+<rect class="term" x="240" y="1253" width="200" height="42" rx="21"/>
+<text x="340" y="1280" class="tw" text-anchor="middle">Wait for next tick</text>
+
+<!-- legend -->
+<rect class="proc" x="640" y="1060" width="18" height="14" rx="3"/>
+<text x="666" y="1072" class="sm">process</text>
+<rect class="dec" x="640" y="1084" width="18" height="14" rx="3"/>
+<text x="666" y="1096" class="sm">decision</text>
+<rect class="go" x="640" y="1108" width="18" height="14" rx="3"/>
+<text x="666" y="1120" class="sm">pump starts</text>
+<rect class="stop" x="640" y="1132" width="18" height="14" rx="3"/>
+<text x="666" y="1144" class="sm">pump stops / refused</text>
+<rect class="hold" x="640" y="1156" width="18" height="14" rx="3"/>
+<text x="666" y="1168" class="sm">no change</text>
+<text x="640" y="1200" class="sm">Thresholds are config values, not</text>
+<text x="640" y="1216" class="sm">magic numbers: see farm/config.py</text>
+</svg>

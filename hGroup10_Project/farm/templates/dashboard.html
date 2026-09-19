@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102d25">
+  <meta http-equiv="refresh" content="5">
+  <title>Verdant Farm OS — {{ team }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+  {% set p = status.pumps[1] %}
+  {% set sensor_health = status.sensor_health %}
+  {% set soil_unhealthy = sensor_health.state != 'online' %}
+  {% set channel_count = namespace(live=0) %}
+  {% for r in live %}
+    {% if not (soil_unhealthy and r.sensor_position == sensor_health.zone and r.sensor_type in sensor_health.affected_sensors) %}
+      {% set channel_count.live = channel_count.live + 1 %}
+    {% endif %}
+  {% endfor %}
+  {% set serial_link = p.link if p.link is defined else none %}
+  {% set esp_error = serial_link.error if serial_link and serial_link.error else ('ESP32 serial link disconnected' if serial_link and not serial_link.connected else none) %}
+  {% set system_error = status.sensor_error or ('soil sensor ' ~ sensor_health.state if soil_unhealthy else none) or esp_error %}
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="Verdant Farm OS home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M26 5C15 6 8 11 7 22c5-7 10-10 16-12-7 4-11 8-13 14 8 1 15-4 16-19Z"/></svg>
+      </span>
+      <span><strong>VERDANT</strong><small>FARM OS</small></span>
+    </a>
+    <nav class="navlinks" aria-label="Dashboard sections">
+      <a href="#sensors">Sensors</a>
+      <a href="#irrigation">Irrigation</a>
+      <a href="#history">History</a>
+    </nav>
+    <div class="system-chip {{ 'danger' if system_error else 'healthy' }}">
+      <span class="pulse-dot"></span>
+      {{ 'Attention needed' if system_error else 'System live' }}
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-shade"></div>
+      <div class="hero-content">
+        <div class="eyebrow"><span></span> Agriculture intelligence · {{ team }}</div>
+        <h1>Cultivate with<br><em>clarity.</em></h1>
+        <p>Real-time crop intelligence and precision irrigation, orchestrated from one resilient edge platform.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#irrigation">Manage irrigation</a>
+          <a class="button ghost" href="#sensors">View live sensors</a>
+        </div>
+      </div>
+      <div class="hero-metrics" aria-label="System summary">
+        <div><span>Live channels</span><strong>{{ channel_count.live }}</strong></div>
+        <div><span>Growing zone</span><strong>{{ position }}</strong></div>
+        <div><span>Irrigation</span><strong class="{{ 'good-text' if p.running else '' }}">{{ 'Running' if p.running else 'Ready' }}</strong></div>
+      </div>
+    </section>
+
+    <section class="status-ribbon" aria-label="System status">
+      <div class="status-item">
+        <span class="status-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v5.5a6 6 0 1 0 8 0V7a4 4 0 0 0-4-4Zm0 2a2 2 0 0 1 2 2v6.5l.6.5a4 4 0 1 1-5.2 0l.6-.5V7a2 2 0 0 1 2-2Z"/></svg>
+        </span>
+        <div><small>ESP32 node</small><strong>{{ 'Disconnected' if esp_error else 'Connected & reporting' }}</strong></div>
+        <span class="state-dot {{ 'bad-dot' if esp_error else '' }}"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm0 2.1 6 2.2V11c0 3.9-2.5 7.7-6 8.9-3.5-1.2-6-5-6-8.9V6.3l6-2.2Z"/></svg>
+        </span>
+        <div><small>Automation</small><strong>{{ 'Manual control' if status.manual_override_s else 'Protection active' }}</strong></div>
+        <span class="state-dot {{ 'warn-dot' if status.manual_override_s else '' }}"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3Zm0 2c3.7 0 5.7.9 6 1.2-.3.4-2.3 1.3-6 1.3s-5.7-.9-6-1.3C6.3 5.9 8.3 5 12 5Zm6 13c-.4.4-2.4 1-6 1s-5.6-.6-6-1v-2.5c1.5.7 3.7 1 6 1s4.5-.3 6-1V18Zm0-5.5c-.4.4-2.4 1-6 1s-5.6-.6-6-1V9.3c1.5.8 3.7 1.2 6 1.2s4.5-.4 6-1.2v3.2Z"/></svg>
+        </span>
+        <div><small>Central sync</small><strong>{{ pending }} row{{ '' if pending == 1 else 's' }} pending</strong></div>
+        <span class="state-dot {{ 'warn-dot' if pending else '' }}"></span>
+      </div>
+    </section>
+
+    <section id="sensors" class="section-block">
+      <div class="section-heading">
+        <div><span class="kicker">Live environment</span><h2>Your farm, at a glance.</h2></div>
+        <div class="section-meta"><span class="live-dot"></span> Updates every 5 seconds</div>
+      </div>
+
+      {% if soil_unhealthy %}
+      <div class="alert-card">
+        <span class="alert-symbol">!</span>
+        <div>
+          <strong>{% if sensor_health.state == 'offline' %}MODBUS sensor offline{% elif sensor_health.state == 'invalid' %}MODBUS sensor reading rejected{% else %}MODBUS sensor unavailable{% endif %}</strong>
+          <p>{{ sensor_health.zone }} soil probe: {{ sensor_health.error or 'waiting for the first complete valid reading' }}</p>
+          <small>Moisture, temperature and EC are unavailable. Pump 1 start is blocked and a stop is commanded immediately; independent ESP32 sensors and the dashboard remain active.{% if sensor_health.seconds_since_success is not none %} Last valid response {{ sensor_health.seconds_since_success }}s ago.{% endif %}</small>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if esp_error %}
+      <div class="alert-card">
+        <span class="alert-symbol">!</span>
+        <div><strong>ESP32 connection needs attention</strong><p>{{ esp_error }}</p><small>The pump remains off when its controller cannot be reached.</small></div>
+      </div>
+      {% endif %}
+
+      <div class="sensor-grid">
+        {% for r in live %}
+        {% set sensor_offline = soil_unhealthy and r.sensor_position == sensor_health.zone and r.sensor_type in sensor_health.affected_sensors %}
+        <article class="sensor-card sensor-{{ r.sensor_type }} {{ 'sensor-offline' if sensor_offline else '' }}">
+          <div class="sensor-top">
+            <span class="sensor-symbol" aria-hidden="true">
+              {% if r.sensor_type in ('moisture', 'humidity', 'water_level') %}
+              <svg viewBox="0 0 24 24"><path d="M12 2S5 10 5 15a7 7 0 0 0 14 0c0-5-7-13-7-13Zm0 18a5 5 0 0 1-5-5c0-2.8 3.1-7.3 5-9.8 1.9 2.5 5 7 5 9.8a5 5 0 0 1-5 5Z"/></svg>
+              {% elif r.sensor_type == 'temperature' %}
+              <svg viewBox="0 0 24 24"><path d="M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0Zm-3 7a3 3 0 0 1-1.5-5.6l.5-.3V5a1 1 0 0 1 2 0v9.1l.5.3A3 3 0 0 1 12 20Z"/></svg>
+              {% elif r.sensor_type == 'light' %}
+              <svg viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm1-13h-2v3h2V2Zm0 17h-2v3h2v-3ZM5.6 4.2 4.2 5.6l2.1 2.1 1.4-1.4-2.1-2.1Zm12.1 12.1-1.4 1.4 2.1 2.1 1.4-1.4-2.1-2.1ZM5 11H2v2h3v-2Zm17 0h-3v2h3v-2ZM6.3 16.3l-2.1 2.1 1.4 1.4 2.1-2.1-1.4-1.4ZM18.4 4.2l-2.1 2.1 1.4 1.4 2.1-2.1-1.4-1.4Z"/></svg>
+              {% else %}
+              <svg viewBox="0 0 24 24"><path d="M4 18h16v2H4v-2Zm1-3 4-5 3 3 4-6 3 8H5Z"/></svg>
+              {% endif %}
+            </span>
+            <span class="mini-status {{ 'offline' if sensor_offline else '' }}">{{ 'Offline - last known' if sensor_offline else 'Live' }}</span>
+          </div>
+          <h3>{{ r.sensor_type|replace('_', ' ')|title }}</h3>
+          <div class="reading">{{ r.sensor_value }}<span>
+            {%- if r.sensor_type in ('moisture', 'humidity', 'light', 'water_level', 'rainfall') %}%
+            {%- elif r.sensor_type in ('temperature', 'air_temperature') %}&deg;C
+            {%- elif r.sensor_type == 'ec' %}&micro;S/cm{% endif -%}
+          </span></div>
+          <div class="sensor-footer"><span>{{ r.sensor_position }}</span><time>{{ r.created_at }}</time></div>
+        </article>
+        {% else %}
+        <article class="sensor-card empty-state"><span class="empty-ring"></span><h3>Waiting for readings</h3><p>The ESP32 has not sent its first sensor packet yet.</p></article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section id="irrigation" class="section-block control-section">
+      <div class="section-heading light-heading">
+        <div><span class="kicker">Precision irrigation</span><h2>Water only when it matters.</h2></div>
+        <div class="section-meta"><span class="shield-check">✓</span> 10-second hardware cutoff</div>
+      </div>
+
+      <div class="control-layout">
+        <article class="pump-panel">
+          <div class="panel-label">Pump 01 · GPIO {{ p.pin }}</div>
+          <div class="pump-visual {{ 'is-running' if p.running else '' }}">
+            <div class="pump-rings"><span></span><span></span><span></span><i></i></div>
+            <div><small>Current state</small><strong>{{ 'RUNNING' if p.running else 'STANDBY' }}</strong>
+              <p>{% if p.running %}Running {{ p.run_seconds }}s of {{ status.thresholds.max_run_s }}s maximum{% elif p.rest_seconds %}Rested for {{ p.rest_seconds }}s{% else %}Ready for first irrigation cycle{% endif %}</p>
+            </div>
+          </div>
+          <div class="pump-actions">
+            <form method="post" action="/pump/on"><button class="control-button start" type="submit" {% if not sensor_health.can_irrigate %}disabled title="Soil sensor unavailable - irrigation is blocked"{% endif %}><span>▶</span> {{ 'Sensor unavailable' if not sensor_health.can_irrigate else 'Start pump' }}</button></form>
+            <form method="post" action="/pump/off"><button class="control-button stop" type="submit"><span>■</span> Stop pump</button></form>
+          </div>
+          {% if status.manual_override_s %}
+          <div class="override-banner">
+            <div><span>Manual override</span><strong>Auto resumes in {{ status.manual_override_s }}s</strong></div>
+            <form method="post" action="/auto/resume"><button type="submit">Resume now</button></form>
+          </div>
+          {% endif %}
+        </article>
+
+        <article class="logic-panel">
+          <div class="panel-label">Automation strategy</div>
+          <h3>Moisture guard</h3>
+          <p class="logic-intro">A protected hysteresis loop keeps the crop hydrated without rapid pump cycling.</p>
+          <div class="threshold-scale">
+            <div class="scale-track"><span class="dry-zone"></span><span class="ideal-zone"></span><span class="wet-zone"></span><i class="on-pin"></i><i class="off-pin"></i></div>
+            <div class="scale-labels"><span>Dry</span><span>Optimal band</span><span>Wet</span></div>
+          </div>
+          <div class="thresholds">
+            <div><small>Start below</small><strong>{{ status.thresholds.on_below }}%</strong></div>
+            <div><small>Stop above</small><strong>{{ status.thresholds.off_above }}%</strong></div>
+            <div><small>Minimum rest</small><strong>{{ status.thresholds.min_rest_s }}s</strong></div>
+          </div>
+          <div class="decision-box">
+            <span class="decision-icon">↳</span>
+            <div><small>Latest decision</small>
+              {% if status.last_decision %}
+              <strong>{{ status.last_decision.decision|replace('_', ' ')|title }}</strong><p>{{ status.last_decision.reason }}</p><span class="source-pill {{ status.last_decision.source }}">{{ status.last_decision.source }}</span>
+              {% else %}
+              <strong>Awaiting first cycle</strong><p>The control loop has not evaluated a reading yet.</p>
+              {% endif %}
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="history" class="section-block">
+      <div class="section-heading">
+        <div><span class="kicker">Operational history</span><h2>Every decision, accountable.</h2></div>
+        <div class="section-meta">Local buffer · automatic central sync</div>
+      </div>
+
+      <div class="summary-grid">
+        <article class="summary-card"><small>Pending sync</small><strong class="{{ 'amber-text' if pending else 'green-text' }}">{{ pending }}</strong><span>database rows</span></article>
+        <article class="summary-card"><small>Rejected data</small><strong class="{{ 'red-text' if total_rejected else 'green-text' }}">{{ total_rejected }}</strong><span>validation events</span></article>
+        <article class="summary-card message-card"><small>Central self-care message</small>{% if selfcare %}<strong>{{ selfcare.message }}</strong><span>{{ selfcare.source }} · {{ selfcare.received_at }}</span>{% else %}<strong>No message received</strong><span>Waiting for central station</span>{% endif %}</article>
+      </div>
+
+      <article class="data-card">
+        <div class="data-card-head"><div><h3>Automation audit</h3><p>Why the irrigation controller made each decision.</p></div><span>{{ decisions|length }} recent</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Recorded</th><th>Decision</th><th>Source</th><th>Moisture</th><th>Temperature</th><th>EC</th><th>Pump</th><th>Reason</th></tr></thead>
+            <tbody>
+              {% for d in decisions %}
+              <tr><td>{{ d.created_at }}</td><td><strong>{{ d.decision|replace('_', ' ')|title }}</strong></td><td><span class="source-pill {{ d.source }}">{{ d.source }}</span></td><td>{{ d.moisture if d.moisture is not none else '—' }}</td><td>{{ d.temperature if d.temperature is not none else '—' }}</td><td>{{ d.ec if d.ec is not none else '—' }}</td><td><span class="table-state {{ 'active' if d.pump_state else '' }}">{{ 'On' if d.pump_state else 'Off' }}</span></td><td class="reason-cell">{{ d.reason }}</td></tr>
+              {% else %}<tr><td colspan="8" class="empty-row">No automation decisions recorded yet.</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="data-card">
+        <div class="data-card-head"><div><h3>Recent sensor readings</h3><p>Validated measurements stored on this edge node.</p></div><span>{{ readings|length }} recent</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Position</th><th>Sensor</th><th>Value</th><th>Recorded</th><th>Central sync</th></tr></thead>
+            <tbody>
+              {% for r in readings %}<tr><td>{{ r.sensor_position }}</td><td><strong>{{ r.sensor_type|replace('_', ' ')|title }}</strong></td><td>{{ r.sensor_value }}</td><td>{{ r.created_at }}</td><td><span class="sync-state {{ 'done' if r.synced else '' }}">{{ 'Synced' if r.synced else 'Pending' }}</span></td></tr>
+              {% else %}<tr><td colspan="5" class="empty-row">No sensor readings stored yet.</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      {% if rejections %}
+      <article class="data-card warning-card">
+        <div class="data-card-head"><div><h3>Validation log</h3><p>Messages rejected before they could enter the trusted dataset.</p></div><span>{{ total_rejected }} total</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Recorded</th><th>Topic</th><th>Reason</th><th>Escaped payload</th></tr></thead><tbody>{% for x in rejections %}<tr><td>{{ x.rejected_at }}</td><td>{{ x.topic }}</td><td class="red-text">{{ x.reason }}</td><td><code>{{ x.raw_excerpt }}</code></td></tr>{% endfor %}</tbody></table></div>
+      </article>
+      {% endif %}
+    </section>
+  </main>
+
+  <footer><div class="footer-brand">VERDANT <span>/</span> {{ team }}</div><p>Edge-powered farm intelligence · {{ position }}</p><a href="#top">Back to top ↑</a></footer>
+</body>
+</html>

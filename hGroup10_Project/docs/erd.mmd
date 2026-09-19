@@ -1,0 +1,43 @@
+%% Task 1 submission - Entity Relationship Diagram
+%% Render at https://mermaid.live and export PNG into docs/
+erDiagram
+    SENSOR_DATA {
+        int           id PK "auto increment"
+        varchar_255   sensor_position
+        decimal_10_2  sensor_value
+        timestamp     created_at
+        varchar_32    sensor_type
+        tinyint       synced "0 = pending push to central"
+        timestamp     synced_at
+    }
+    SELFCARE_MESSAGE {
+        int         id PK
+        text        message "stored raw, escaped at render"
+        varchar_32  source "central_db | mqtt"
+        timestamp   received_at
+    }
+    REJECTED_MESSAGES {
+        int          id PK
+        varchar_255  topic
+        varchar_255  reason "why validation failed"
+        varchar_512  raw_excerpt "truncated, inert"
+        int          payload_len
+        timestamp    rejected_at
+    }
+    SYNC_LOG {
+        int          id PK
+        int          rows_pushed
+        varchar_32   status "ok | error"
+        varchar_255  detail
+        timestamp    ran_at
+    }
+    CENTRAL_SENSOR_DATA {
+        int           id PK
+        varchar_255   sensor_position
+        decimal_10_2  sensor_value
+        timestamp     created_at
+        varchar_64    source_node "team identifier"
+    }
+
+    SENSOR_DATA ||--o{ SYNC_LOG : "batched by"
+    SENSOR_DATA ||--o{ CENTRAL_SENSOR_DATA : "replicated to"
