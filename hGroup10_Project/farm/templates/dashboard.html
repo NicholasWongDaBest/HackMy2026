@@ -1,21 +1,30 @@
+  {% set p = status.pumps[1] %}
+  {% set sensor_health = status.sensor_health %}
+  {% set soil_unhealthy = sensor_health.state != 'online' %}
+  {% set channel_count = namespace(live=0) %}
+  {% for r in live %}
+    {% if not (soil_unhealthy and r.sensor_position == sensor_health.zone and r.sensor_type in sensor_health.affected_sensors) %}
+      {% set channel_count.live = channel_count.live + 1 %}
+    {% endif %}
+  {% endfor %}
+  {% set serial_link = p.link if p.link is defined else none %}
+  {% set esp_error = serial_link.error if serial_link and serial_link.error else ('ESP32 serial link disconnected' if serial_link and not serial_link.connected else none) %}
+  {% set system_error = status.sensor_error or ('soil sensor ' ~ sensor_health.state if soil_unhealthy else none) or esp_error %}
+{% block page %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#102d25">
-  <meta http-equiv="refresh" content="5">
   <title>Verdant Farm OS — {{ team }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
 </head>
-<body>
-  {% set p = status.pumps[1] %}
-  {% set serial_link = p.link if p.link is defined else none %}
-  {% set esp_error = serial_link.error if serial_link and serial_link.error else ('ESP32 serial link disconnected' if serial_link and not serial_link.connected else none) %}
-  {% set system_error = status.sensor_error or esp_error %}
+<body data-updates-url="{{ url_for('dashboard_updates') }}">
   <header class="topbar">
     <a class="brand" href="#top" aria-label="Verdant Farm OS home">
       <span class="brand-mark" aria-hidden="true">
@@ -28,10 +37,12 @@
       <a href="#irrigation">Irrigation</a>
       <a href="#history">History</a>
     </nav>
-    <div class="system-chip {{ 'danger' if system_error else 'healthy' }}">
+    {% block system_status %}
+    <div id="system-status" data-live-region class="system-chip {{ 'danger' if system_error else 'healthy' }}">
       <span class="pulse-dot"></span>
       {{ 'Attention needed' if system_error else 'System live' }}
     </div>
+    {% endblock %}
   </header>
 
   <main id="top">
@@ -46,14 +57,17 @@
           <a class="button ghost" href="#sensors">View live sensors</a>
         </div>
       </div>
-      <div class="hero-metrics" aria-label="System summary">
-        <div><span>Live channels</span><strong>{{ live|length }}</strong></div>
+      {% block metrics %}
+      <div id="hero-metrics" data-live-region class="hero-metrics" aria-label="System summary">
+        <div><span>Live channels</span><strong>{{ channel_count.live }}</strong></div>
         <div><span>Growing zone</span><strong>{{ position }}</strong></div>
         <div><span>Irrigation</span><strong class="{{ 'good-text' if p.running else '' }}">{{ 'Running' if p.running else 'Ready' }}</strong></div>
       </div>
+      {% endblock %}
     </section>
 
-    <section class="status-ribbon" aria-label="System status">
+    {% block ribbon %}
+    <section id="status-ribbon" data-live-region class="status-ribbon" aria-label="System status">
       <div class="status-item">
         <span class="status-icon">
           <svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v5.5a6 6 0 1 0 8 0V7a4 4 0 0 0-4-4Zm0 2a2 2 0 0 1 2 2v6.5l.6.5a4 4 0 1 1-5.2 0l.6-.5V7a2 2 0 0 1 2-2Z"/></svg>
@@ -76,23 +90,43 @@
         <span class="state-dot {{ 'warn-dot' if pending else '' }}"></span>
       </div>
     </section>
+    {% endblock %}
 
     <section id="sensors" class="section-block">
       <div class="section-heading">
         <div><span class="kicker">Live environment</span><h2>Your farm, at a glance.</h2></div>
-        <div class="section-meta"><span class="live-dot"></span> Updates every 5 seconds</div>
+        <div class="section-meta"><span class="live-dot"></span> <span id="update-status" role="status">Connecting live updates...</span></div>
       </div>
+      <noscript><p>Live updates need JavaScript. Reload manually to see current readings.</p></noscript>
 
-      {% if system_error %}
+      {% block alerts %}
+      <div id="sensor-alerts" data-live-region>
+      {% if soil_unhealthy %}
       <div class="alert-card">
         <span class="alert-symbol">!</span>
-        <div><strong>Hardware connection needs attention</strong><p>{{ system_error }}</p><small>The pump remains off when its controller cannot be reached. Irrigation also fails safe on stale soil data.</small></div>
+        <div>
+          <strong>{% if sensor_health.state == 'offline' %}MODBUS sensor offline{% elif sensor_health.state == 'invalid' %}MODBUS sensor reading rejected{% else %}MODBUS sensor unavailable{% endif %}</strong>
+          <p>{{ sensor_health.zone }} soil probe: {{ sensor_health.error or 'waiting for the first complete valid reading' }}</p>
+          <small>Moisture, temperature and EC are unavailable. Pump 1 start is blocked and a stop is commanded immediately; independent ESP32 sensors and the dashboard remain active.{% if sensor_health.seconds_since_success is not none %} Last valid response {{ sensor_health.seconds_since_success }}s ago.{% endif %}</small>
+        </div>
       </div>
       {% endif %}
 
-      <div class="sensor-grid">
+      {% if esp_error %}
+      <div class="alert-card">
+        <span class="alert-symbol">!</span>
+        <div><strong>ESP32 connection needs attention</strong><p>{{ esp_error }}</p><small>The pump remains off when its controller cannot be reached.</small></div>
+      </div>
+      {% endif %}
+
+      </div>
+      {% endblock %}
+
+      {% block sensors %}
+      <div id="sensor-readings" data-live-region class="sensor-grid">
         {% for r in live %}
-        <article class="sensor-card sensor-{{ r.sensor_type }}">
+        {% set sensor_offline = soil_unhealthy and r.sensor_position == sensor_health.zone and r.sensor_type in sensor_health.affected_sensors %}
+        <article class="sensor-card sensor-{{ r.sensor_type }} {{ 'sensor-offline' if sensor_offline else '' }}">
           <div class="sensor-top">
             <span class="sensor-symbol" aria-hidden="true">
               {% if r.sensor_type in ('moisture', 'humidity', 'water_level') %}
@@ -105,7 +139,7 @@
               <svg viewBox="0 0 24 24"><path d="M4 18h16v2H4v-2Zm1-3 4-5 3 3 4-6 3 8H5Z"/></svg>
               {% endif %}
             </span>
-            <span class="mini-status">Live</span>
+            <span class="mini-status {{ 'offline' if sensor_offline else '' }}">{{ 'Offline - last known' if sensor_offline else 'Live' }}</span>
           </div>
           <h3>{{ r.sensor_type|replace('_', ' ')|title }}</h3>
           <div class="reading">{{ r.sensor_value }}<span>
@@ -119,6 +153,7 @@
         <article class="sensor-card empty-state"><span class="empty-ring"></span><h3>Waiting for readings</h3><p>The ESP32 has not sent its first sensor packet yet.</p></article>
         {% endfor %}
       </div>
+      {% endblock %}
     </section>
 
     <section id="irrigation" class="section-block control-section">
@@ -130,22 +165,25 @@
       <div class="control-layout">
         <article class="pump-panel">
           <div class="panel-label">Pump 01 · GPIO {{ p.pin }}</div>
-          <div class="pump-visual {{ 'is-running' if p.running else '' }}">
+          {% block pump_status %}
+          <div id="pump-status" data-live-region data-start-allowed="{{ 'true' if sensor_health.can_irrigate and not esp_error else 'false' }}" class="pump-visual {{ 'is-running' if p.running else '' }}">
             <div class="pump-rings"><span></span><span></span><span></span><i></i></div>
             <div><small>Current state</small><strong>{{ 'RUNNING' if p.running else 'STANDBY' }}</strong>
               <p>{% if p.running %}Running {{ p.run_seconds }}s of {{ status.thresholds.max_run_s }}s maximum{% elif p.rest_seconds %}Rested for {{ p.rest_seconds }}s{% else %}Ready for first irrigation cycle{% endif %}</p>
             </div>
           </div>
+          {% endblock %}
           <div class="pump-actions">
-            <form method="post" action="/pump/on"><button class="control-button start" type="submit"><span>▶</span> Start pump</button></form>
-            <form method="post" action="/pump/off"><button class="control-button stop" type="submit"><span>■</span> Stop pump</button></form>
+            <form data-dashboard-action method="post" action="/pump/on"><button id="pump-start" class="control-button start" type="submit" {% if not sensor_health.can_irrigate or esp_error %}disabled{% endif %}><span>▶</span> <span id="pump-start-label">{{ 'Sensor unavailable' if not sensor_health.can_irrigate or esp_error else 'Start pump' }}</span></button></form>
+            <form data-dashboard-action method="post" action="/pump/off"><button class="control-button stop" type="submit"><span>■</span> Stop pump</button></form>
           </div>
-          {% if status.manual_override_s %}
-          <div class="override-banner">
-            <div><span>Manual override</span><strong>Auto resumes in {{ status.manual_override_s }}s</strong></div>
-            <form method="post" action="/auto/resume"><button type="submit">Resume now</button></form>
+          <p id="action-status" class="action-status" role="status" aria-live="polite"></p>
+          <div id="override-banner" class="override-banner" {% if not status.manual_override_s %}hidden{% endif %}>
+            {% block override_status %}
+            <div id="override-status" data-live-region data-active="{{ 'true' if status.manual_override_s else 'false' }}"><span>Manual override</span><strong>Auto resumes in {{ status.manual_override_s }}s</strong></div>
+            {% endblock %}
+            <form data-dashboard-action method="post" action="/auto/resume"><button type="submit">Resume now</button></form>
           </div>
-          {% endif %}
         </article>
 
         <article class="logic-panel">
@@ -161,7 +199,8 @@
             <div><small>Stop above</small><strong>{{ status.thresholds.off_above }}%</strong></div>
             <div><small>Minimum rest</small><strong>{{ status.thresholds.min_rest_s }}s</strong></div>
           </div>
-          <div class="decision-box">
+          {% block decision %}
+          <div id="latest-decision" data-live-region class="decision-box">
             <span class="decision-icon">↳</span>
             <div><small>Latest decision</small>
               {% if status.last_decision %}
@@ -171,6 +210,7 @@
               {% endif %}
             </div>
           </div>
+          {% endblock %}
         </article>
       </div>
     </section>
@@ -181,13 +221,16 @@
         <div class="section-meta">Local buffer · automatic central sync</div>
       </div>
 
-      <div class="summary-grid">
+      {% block summary %}
+      <div id="history-summary" data-live-region class="summary-grid">
         <article class="summary-card"><small>Pending sync</small><strong class="{{ 'amber-text' if pending else 'green-text' }}">{{ pending }}</strong><span>database rows</span></article>
         <article class="summary-card"><small>Rejected data</small><strong class="{{ 'red-text' if total_rejected else 'green-text' }}">{{ total_rejected }}</strong><span>validation events</span></article>
         <article class="summary-card message-card"><small>Central self-care message</small>{% if selfcare %}<strong>{{ selfcare.message }}</strong><span>{{ selfcare.source }} · {{ selfcare.received_at }}</span>{% else %}<strong>No message received</strong><span>Waiting for central station</span>{% endif %}</article>
       </div>
+      {% endblock %}
 
-      <article class="data-card">
+      {% block audit %}
+      <article id="automation-audit" data-live-region class="data-card">
         <div class="data-card-head"><div><h3>Automation audit</h3><p>Why the irrigation controller made each decision.</p></div><span>{{ decisions|length }} recent</span></div>
         <div class="table-wrap">
           <table>
@@ -200,8 +243,10 @@
           </table>
         </div>
       </article>
+      {% endblock %}
 
-      <article class="data-card">
+      {% block history %}
+      <article id="reading-history" data-live-region class="data-card">
         <div class="data-card-head"><div><h3>Recent sensor readings</h3><p>Validated measurements stored on this edge node.</p></div><span>{{ readings|length }} recent</span></div>
         <div class="table-wrap">
           <table>
@@ -213,16 +258,22 @@
           </table>
         </div>
       </article>
+      {% endblock %}
 
+      {% block rejections_log %}
+      <div id="validation-history" data-live-region>
       {% if rejections %}
       <article class="data-card warning-card">
         <div class="data-card-head"><div><h3>Validation log</h3><p>Messages rejected before they could enter the trusted dataset.</p></div><span>{{ total_rejected }} total</span></div>
         <div class="table-wrap"><table><thead><tr><th>Recorded</th><th>Topic</th><th>Reason</th><th>Escaped payload</th></tr></thead><tbody>{% for x in rejections %}<tr><td>{{ x.rejected_at }}</td><td>{{ x.topic }}</td><td class="red-text">{{ x.reason }}</td><td><code>{{ x.raw_excerpt }}</code></td></tr>{% endfor %}</tbody></table></div>
       </article>
       {% endif %}
+      </div>
+      {% endblock %}
     </section>
   </main>
 
   <footer><div class="footer-brand">VERDANT <span>/</span> {{ team }}</div><p>Edge-powered farm intelligence · {{ position }}</p><a href="#top">Back to top ↑</a></footer>
 </body>
 </html>
+{% endblock %}

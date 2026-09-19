@@ -116,11 +116,14 @@ main { overflow: hidden; }
 .sensor-card { position: relative; min-height: 230px; padding: 24px; overflow: hidden; border: 1px solid var(--line); border-radius: 19px; background: #fff; box-shadow: 0 10px 35px rgba(22,54,42,.045); transition: transform .2s, box-shadow .2s; }
 .sensor-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
 .sensor-card::after { content: ""; position: absolute; width: 130px; height: 130px; right: -48px; bottom: -58px; border-radius: 50%; background: var(--sensor-tint, #eef7f1); }
+.sensor-card.sensor-offline { border-color: #efc8c3; background: #fff8f6; filter: saturate(.65); }
 .sensor-top { display: flex; justify-content: space-between; align-items: center; }
 .sensor-symbol { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 13px; color: var(--sensor-color, var(--leaf)); background: var(--sensor-tint, #eef7f1); }
 .sensor-symbol svg { width: 23px; fill: currentColor; }
 .mini-status { position: relative; padding-left: 14px; color: #56806b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; }
 .mini-status::before { content: ""; position: absolute; width: 6px; height: 6px; left: 0; top: 5px; border-radius: 50%; background: #36a86e; }
+.mini-status.offline { color: #9a4038; }
+.mini-status.offline::before { background: var(--red); box-shadow: 0 0 0 4px rgba(200,87,75,.12); }
 .sensor-card h3 { margin: 23px 0 2px; color: var(--ink-soft); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .reading { font: 700 42px Manrope, sans-serif; letter-spacing: -.04em; }
 .reading span { margin-left: 5px; color: var(--ink-soft); font-size: 15px; font-weight: 600; letter-spacing: 0; }
@@ -163,6 +166,10 @@ main { overflow: hidden; }
 .pump-actions form, .override-banner form { margin: 0; }
 .control-button { width: 100%; min-height: 52px; border: 0; border-radius: 12px; cursor: pointer; font-weight: 800; transition: .2s; }
 .control-button:hover { transform: translateY(-2px); filter: brightness(1.03); }
+.control-button:disabled { cursor: not-allowed; opacity: .58; transform: none; box-shadow: none; }
+.control-button[aria-busy="true"] { cursor: progress; }
+.action-status { min-height: 1.5em; margin: 10px 0 0; font-size: 13px; }
+.override-banner[hidden] { display: none; }
 .control-button span { margin-right: 7px; font-size: 11px; }
 .control-button.start { color: #fff; background: var(--leaf); box-shadow: 0 10px 24px rgba(47,125,87,.22); }
 .control-button.stop { color: #93453d; border: 1px solid #e5c5c1; background: #fff; }

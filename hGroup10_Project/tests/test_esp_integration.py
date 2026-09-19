@@ -36,7 +36,17 @@ class SensorError(RuntimeError):
     pass
 
 
+class SensorCommunicationError(SensorError):
+    pass
+
+
+class SensorDataError(SensorError):
+    pass
+
+
 fake_sensors.SensorError = SensorError
+fake_sensors.SensorCommunicationError = SensorCommunicationError
+fake_sensors.SensorDataError = SensorDataError
 fake_sensors.read_all = mock.Mock()
 sys.modules["farm.sensors"] = fake_sensors
 
@@ -152,6 +162,8 @@ class ControllerTests(unittest.TestCase):
         fake_database.insert_reading.reset_mock()
         fake_database.log_decision.reset_mock()
         fake_sensors.read_all.reset_mock()
+        fake_sensors.read_all.side_effect = None
+        fake_sensors.read_all.return_value = {}
 
     def make_controller(self):
         with mock.patch.object(esp_link, "get_hardware", return_value=self.hardware):
@@ -174,12 +186,77 @@ class ControllerTests(unittest.TestCase):
 
     def test_stale_reading_stops_running_pump(self):
         controller = self.make_controller()
+        controller.sensor_health.mark_success()
         controller.latest = {"moisture": 5.0}
         controller.latest_at = time.time() - config.READING_STALE_S - 1
         self.hardware._pump.running = True
         decision, _, source = controller.decide()
         self.assertEqual(decision, "pump_off")
         self.assertEqual(source, "safety")
+
+    def test_sensor_timeout_stops_running_pump_in_same_tick(self):
+        controller = self.make_controller()
+        controller.sensor_health.mark_success()
+        controller.latest = {"moisture": 5.0}
+        self.hardware._pump.running = True
+        fake_sensors.read_all.side_effect = SensorCommunicationError("timeout")
+
+        controller.tick(store=False)
+
+        self.assertFalse(self.hardware._pump.running)
+        self.assertEqual(controller.status()["sensor_health"]["state"], "offline")
+        self.assertEqual(controller.last_decision["source"], "safety")
+
+    def test_cached_low_reading_cannot_restart_pump_after_timeout(self):
+        controller = self.make_controller()
+        controller.sensor_health.mark_success()
+        controller.latest = {"moisture": 5.0}
+        fake_sensors.read_all.side_effect = SensorCommunicationError("timeout")
+        controller.tick(store=False)
+
+        decision, reason, source = controller.decide()
+
+        self.assertEqual(decision, "hold")
+        self.assertEqual(source, "safety")
+        self.assertIn("offline", reason)
+
+    def test_manual_start_is_blocked_when_sensor_is_offline(self):
+        controller = self.make_controller()
+        controller.sensor_health.mark_failure("offline", "timeout")
+        self.hardware._pump.start = mock.Mock(
+            wraps=self.hardware._pump.start
+        )
+
+        ok, reason = controller.manual("on")
+
+        self.assertFalse(ok)
+        self.assertIn("refused", reason)
+        self.hardware._pump.start.assert_not_called()
+
+    def test_repeated_timeout_does_not_duplicate_safety_decision(self):
+        controller = self.make_controller()
+        controller.sensor_health.mark_success()
+        fake_sensors.read_all.side_effect = SensorCommunicationError("timeout")
+
+        controller.tick(store=False)
+        first_log_count = fake_database.log_decision.call_count
+        controller.tick(store=False)
+
+        self.assertEqual(fake_database.log_decision.call_count, first_log_count)
+
+    def test_valid_reading_recovers_without_controller_restart(self):
+        controller = self.make_controller()
+        controller.sensor_health.mark_failure("offline", "timeout")
+        fake_sensors.read_all.return_value = {
+            "moisture": 40.0, "temperature": 24.0, "ec": 100.0,
+        }
+
+        controller.tick(store=False)
+
+        health = controller.status()["sensor_health"]
+        self.assertEqual(health["state"], "online")
+        self.assertTrue(health["can_irrigate"])
+        self.assertIsNone(controller.last_error)
 
     def test_unexpected_decision_error_stops_all_pumps(self):
         controller = self.make_controller()

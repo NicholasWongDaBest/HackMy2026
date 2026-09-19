@@ -1,6 +1,6 @@
 # Save the Farm - canonical project tracker
 
-Last updated: 2026-09-19 22:15 +08:00 (Asia/Singapore)
+Last updated: 2026-09-20 01:30 +08:00 (Asia/Singapore)
 
 This is the canonical status record for branch `nicholas` at commit `44d173c`. `STATUS.md` is an older Foundation snapshot; where it conflicts with this file, use this file.
 
@@ -24,6 +24,7 @@ Build and defend an edge-based irrigation system that reads real sensors at leas
 RS485 3-in-1 probe
   -> USB-RS485 / Modbus RTU
   -> farm.sensors
+  -> farm.sensor_health (source-level online/offline/invalid state)
   -> farm.control (moisture hysteresis decision source)
   -> local MariaDB sensor_data + automation_log
   -> Flask dashboard
@@ -69,7 +70,7 @@ Each phase has an explicit checklist derived from the brief's narrative, objecti
 | Task2 | 25% (3/12) | In progress | Typed MQTT/serial readings have physical-range checks; rejections can be shown on dashboard | Trust-boundary validation exists but is incomplete | Implement/publish Challenge2 trigger; validate hostile rows inserted by Central; prevent mixed-payload bypass; comparison screenshot; SVN commit | Challenge explicitly injects into the sensor table, while direct DB values bypass validation | Mixed invalid sensor plus `message` payload was reproduced as accepted self-care text |
 | Task3 | 31% (5/16) | In progress | Control, dashboard, and local logging are designed to run on the Pi; unsynced rows are retried automatically | Local-first buffering and retry logic exist in source | Implement trigger; prove blackout behavior; make sync idempotent; restore every row with no gaps/duplicates; SVN commit | Central insert commits before local `synced` update and has no stable idempotency key | Source traced; no real outage/recovery test |
 | Task4 | 8% (1/12) | In progress | A two-channel GPIO fallback exists as scaffolding | ESP32 water level is captured for display | Detect 25% low water; implement two pump flows, crop-health priority/allocation policy, low-water interlock, explanation, demo, and SVN commit | Default ESP backend exposes only pump 1; controller never reads water level; no zone/container model | Search found no `pump(2)` control path and no water-level decision path |
-| Task5 | 36% (5/14) | In progress | Modbus errors are caught; dashboard can show a sensor error; ESP32 reader runs independently; controller loop catches failures | Stale-data cutoff and 10-second pump cutoff provide partial protection | Invalidate a failed current reading immediately; define safe degraded automation; prove remaining sensors/dashboard continue; photo; SVN commit | After a poll failure the controller may act on the previous reading for up to 180 seconds | Unit test covers stale data, not immediate removal; no physical disconnect test |
+| Task5 | 36% (5/14) | Implemented locally, hardware verification pending | Two-second source-health checks, PyModbus `device_id`/legacy `slave` compatibility, typed failures, immediate auto/manual irrigation block, same-cycle pump stop, reconnect reset, structured API state, and offline dashboard labels exist | Pi ran 29/29 pre-compatibility tests and served the dashboard, exposing the live API/config blockers; the compatibility fix passes 30/30 locally | Deploy compatibility fix; configure stable ESP32 port; prove physical timeout, alert, continued readings, recovery, photo, and SVN commit | Pi runtime used PyModbus `device_id` API and had no `NODE_SERIAL_PORT`; neither actual removal nor continued ESP32 readings has been tested | Pi log records HTTP 200 dashboard responses and the two blockers; 30/30 current hardware-free tests pass; no actuator energized |
 | FunBox | 30% (3/10) | Implemented but unverified | BCM26 button callback toggles pump 1 through the same controller backend | Backend action and 10-second cutoff are implemented | Wire/test a real panel button, document the chosen action and safety precedence, demonstrate, SVN commit | Physical wiring unverified; manual start bypasses minimum-rest check; production has no timed override despite UI/flowchart wording | Source review only; no recorded button press |
 | Perfect Storm | 0% (0/8) | Not started | No combined-scenario evidence | Depends on all prior phases | Handle internet down, one sensor removed, low water, and extreme temperature simultaneously without restart/patch; SVN commit | Task2, Task4, and Task5 acceptance gaps must be closed first | No combined test or supporting evidence |
 
@@ -130,11 +131,11 @@ Legend: `[x]` verified (2), `[~]` implemented/reported but not fully verified (1
 
 ### Task5 - 5/14
 
-- [~] A removed Modbus probe should produce a caught timeout/error.
-- [~] Dashboard can display the resulting `sensor_error`.
-- [~] Ten-second runtime and 180-second stale-reading cutoffs exist, but an immediate poll failure does not invalidate the previous reading.
-- [~] Independent ESP32 sensor ingestion can continue while the RS485 probe fails.
-- [~] Exceptions are caught so the process/dashboard is intended to stay up; physical removal is unverified.
+- [~] Communication failures are classified, reset the Modbus client, and transition the physical source offline; actual removal is unverified.
+- [~] Dashboard/API expose structured health, a visible Modbus alert, last-known labels, affected channels, and irrigation-block status; Flask rendering on the Pi is unverified.
+- [~] A failed health check immediately gates both automatic and manual Pump ON and stops a running affected pump in the same software cycle; physical relay behavior is unverified.
+- [~] Fast Modbus checks are independent of one-minute persistence, and the ESP32 reader remains an independent thread/source; continued live readings during removal are unverified.
+- [~] Repeated failures are suppressed, the loop continues, and a later complete read recovers without restart in hardware-free tests; physical recovery is unverified.
 - [ ] Required photo of the disconnected sensor and dashboard alert is absent.
 - [ ] Required SVN `Challenge5 : Completed` commit is not evidenced.
 
@@ -278,13 +279,48 @@ Not run: current code on the Raspberry Pi, MariaDB schema/query verification, su
 ## Prioritized next actions
 
 1. **Synchronize the Raspberry Pi with current `nicholas` source** and confirm the package name, Git/SVN revision, and stable serial paths before diagnosing old logs.
-2. **Close Welcome safety blockers**: pin/update PyModbus, invalidate data immediately on poll failure, add graceful shutdown, and correct/regenerate the flowchart.
+2. **Close Welcome safety blockers**: pin/update PyModbus, deploy and physically verify immediate failure handling, add graceful shutdown, and correct/regenerate the flowchart.
 3. **Run a non-actuating Pi bring-up**: database, RS485 readings, ESP32 JSON/status, dashboard, and logs with pump power disconnected.
 4. **Verify relay safety physically**, then perform one supervised pump command and automation cycle; capture the required Welcome screenshot and submit via SVN.
 5. **Complete Task1 before Task2**: deploy the request-only MQTT handler, capture the full Central request and verdict, then make sync idempotent, wire the Central self-care source, prove live sync, render the ERD, capture evidence, and commit.
-6. Implement and verify Task2/3 triggers and failure behavior, then design Task4's two-pump allocation and low-water interlock before Task5/FunBox/Perfect Storm.
+6. Implement and verify Task2/3 triggers and failure behavior, integrate Task4's two-pump allocation/low-water interlock with `SensorHealth.can_irrigate()`, then physically verify Task5 before FunBox/Perfect Storm.
 
 ## Chronological change log
+
+### 2026-09-20 01:30 +08:00 - Dashboard refresh and button navigation fix
+
+- Cause: `dashboard.html` used a five-second meta refresh, reloading the entire page, while control form submissions redirected back to `/`.
+- Changed: replaced full document refresh with five-second background fetches of escaped, server-rendered display regions at `/api/dashboard`. Stable page, control, and table containers remain in place. Pump and Resume forms request JSON and show the actual server response inline. Normal form redirects remain as a JavaScript-disabled fallback.
+- Changed: one poll at a time, eight-second request timeout, hidden-tab pause, stale-response protection around commands, visible connection-loss feedback, and duplicate-command suppression. Start is blocked while displayed state is stale; Stop remains available. Commands are never retried automatically.
+- Phases affected: Welcome dashboard usability, Task1 Selfcare display, Task2 rejection display, Task3 sync display, Task5 health alerts, and the manual control UI. Controller, Modbus, MQTT, sync, and firmware behavior are unchanged.
+- Checks/results: 38/38 Python tests pass with the existing Anaconda Flask/Jinja environment, including eight isolated dashboard HTTP/template tests. Nine headless Chrome browser scenarios pass: scroll/focus preservation with changed readings; sensor offline/recovery; escaped Selfcare/rejections; single-submit/no-navigation buttons; refusal and Resume feedback; update failure/recovery; slow-poll race protection; uncertain command timeout without resend; hidden-tab pause/resume. JavaScript syntax and Git whitespace checks pass. All browser requests were intercepted locally; no production controller, database, Pi process, or actuator was accessed.
+- Unverified: actual Pi browser scroll/click behavior and latency after deployment; sensor removal/recovery remains unproven by supplied healthy-run logs.
+- Percentage changes: no phase scores changed; dashboard usability work does not establish additional physical challenge evidence.
+- Next action: deploy `farm/app.py`, both dashboard HTML templates, `farm/static/dashboard.js`, and `farm/static/dashboard.css` together; also upload `tests/test_dashboard.py` and this tracker. Stop the existing `farm.app`, restart with the established serial environment, and hard-refresh the browser once. Confirm scrolling remains steady through multiple five-second updates and control clicks produce inline responses.
+
+### 2026-09-20 00:22 +08:00 - Pi runtime blockers and PyModbus compatibility
+
+- Actual Pi evidence: `python3 -m unittest discover -s tests -v` passed 29/29 and quiet `compileall` completed. `farm.app` remained up and served the dashboard/CSS with HTTP 200/304 responses.
+- Runtime blocker found: the installed PyModbus rejects `slave=` and requires `device_id=`. This was a software API mismatch, not evidence that the physical sensor had been removed.
+- Runtime blocker found: `NODE_SERIAL_PORT` was empty, so the ESP32 reader retried every five seconds and independent sensor continuity could not be demonstrated.
+- Changed: `farm/sensors.py` now prefers current PyModbus `device_id=` and falls back only when an older version rejects that keyword. Transport failures still reset the client and fail safe.
+- Tests: added modern-API and legacy-keyword coverage. The current hardware-free suite passes 30/30 and Python compilation succeeds. No hardware path was invoked.
+- Phases affected: Welcome and Task5 Modbus compatibility. Task1 MQTT, Task2 validation, Task3 synchronization, Task4 allocation, firmware, database schema, and dashboard layout are unchanged.
+- Unverified: the fix has not been copied to the Pi; the correct stable ESP32 `/dev/serial/by-id/...` path is not recorded; no physical removal/reconnection or continued-reading test has occurred.
+- Percentage change: Task5 remains 36% (5/14) pending actual hardware evidence.
+- Next action: upload `farm/sensors.py` and `tests/test_modbus_sensor.py`, list `/dev/serial/by-id/`, start `farm.app` with the real `NODE_SERIAL_PORT`, confirm both sensor sources are healthy, then conduct the powered-off-pump removal/recovery test.
+
+### 2026-09-20 00:09 +08:00 - Task 5 sensor-removal fail-safe implementation
+
+- Changed: added `farm/sensor_health.py` with thread-safe source-level health, timestamps, affected channels, irrigation eligibility, transition suppression, and automatic recovery state.
+- Changed: `farm/sensors.py` now distinguishes communication loss from implausible data, never returns partial values, resets the Modbus client after transport/protocol failure, and reconnects on a later check.
+- Changed: `farm/control.py` checks sensor health every two seconds while preserving one-minute database persistence. A failed check immediately blocks cached data, stops a running affected pump, blocks automatic/manual Pump ON, avoids duplicate decisions on repeated failures, and resumes from a later complete valid read without application restart.
+- Changed: the dashboard/API now expose the structured health state, describe the affected zone/channels, mark retained values as `Offline - last known`, keep independent channels visibly live, and disable the visual Pump ON control while the soil source is unavailable. Server-side blocking remains authoritative.
+- Tests: baseline was 16/16. The expanded hardware-free suite passes 29/29, covering health transitions, same-cycle stop, cached-low-value blocking, manual-start refusal, repeated-timeout suppression, unrelated-zone eligibility, invalid-data classification, Modbus client reset, complete reads, and restart-free recovery. Changed Python files compile successfully.
+- Phases affected: Task5 primarily; Welcome, FunBox safety, and future Task4/Perfect Storm integration benefit from the shared safety gate. MQTT verification, Task2 validation, Task3 synchronization, database schema, firmware, and physical wiring are unchanged. No serial port, relay, or pump was activated.
+- Unverified: Raspberry Pi/PyModbus compatibility, actual removal timing, live dashboard rendering, continued ESP32 timestamps, relay state, automatic physical reconnection, required photo, and SVN submission.
+- Percentage change: Task5 remains 36% (5/14). The missing behavior is implemented and locally tested, but the scoring policy does not award full hardware criteria without actual device evidence.
+- Next action: deploy the changed Task5 files to the Pi, keep pump power disconnected, run the full suite, then unplug/reconnect the Modbus probe while recording logs, dashboard state, continued ESP32 readings, and the required photo.
 
 ### 2026-09-19 22:15 +08:00 - Task 1 live response-topic correction
 

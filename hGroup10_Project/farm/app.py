@@ -23,15 +23,13 @@ app = Flask(__name__)
 log = logging.getLogger("app")
 
 
-@app.route("/")
-def dashboard():
+def dashboard_context():
     ctl = control.get_controller()
     selfcare = database.latest_selfcare()
     readings = database.recent_readings(20)
     total_rejected, rejections = database.rejection_summary(10)
     pending, last_sync = database.sync_status()
-    return render_template(
-        "dashboard.html",
+    return dict(
         team=config.TEAM_NAME,
         selfcare=selfcare,
         readings=readings,
@@ -43,6 +41,21 @@ def dashboard():
         status=ctl.status(),
         decisions=database.recent_decisions(10),
         position=config.SENSOR_POSITION,
+    )
+
+
+@app.route("/")
+def dashboard():
+    return render_template("dashboard.html", **dashboard_context())
+
+
+@app.get("/api/dashboard")
+def dashboard_updates():
+    # Reuse the escaped Jinja blocks without resending the page shell/assets.
+    return (
+        render_template("dashboard_updates.html", **dashboard_context()),
+        200,
+        {"Cache-Control": "no-store"},
     )
 
 
@@ -61,6 +74,8 @@ def pump(action):
 @app.route("/auto/resume", methods=["POST"])
 def resume_auto():
     control.get_controller().resume_auto()
+    if request.headers.get("Accept", "").startswith("application/json"):
+        return jsonify({"ok": True, "reason": "Automatic control resumed"})
     return redirect(url_for("dashboard"))
 
 

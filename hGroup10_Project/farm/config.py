@@ -92,6 +92,9 @@ BUTTON_PIN = int(os.getenv("BUTTON_PIN", "26"))
 
 # ---- Polling and automation -------------------------------------------
 POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "60"))   # brief: every 1 minute
+# Probe health is checked independently from one-minute database persistence.
+# With the one-second serial timeout, removal is normally known within ~3s.
+SENSOR_HEALTH_CHECK_S = float(os.getenv("SENSOR_HEALTH_CHECK_S", "2.0"))
 
 # Hysteresis band. Turning on and off at the same threshold makes the pump
 # chatter around the setpoint; the gap between these two numbers is what

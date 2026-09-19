@@ -17,7 +17,15 @@ log = logging.getLogger("sensors")
 
 
 class SensorError(Exception):
-    """The probe could not be read. Never substitute a default value."""
+    """The probe could not provide a trusted complete reading."""
+
+
+class SensorCommunicationError(SensorError):
+    """The Modbus device or serial transport did not respond correctly."""
+
+
+class SensorDataError(SensorError):
+    """The device responded, but the value is physically implausible."""
 
 
 def _decode(raw: int, scale: float, signed: bool) -> float:
@@ -30,7 +38,11 @@ def _decode(raw: int, scale: float, signed: bool) -> float:
 
 class SoilSensor:
     def __init__(self):
-        self.client = ModbusSerialClient(
+        self.client = self._new_client()
+
+    @staticmethod
+    def _new_client():
+        return ModbusSerialClient(
             port=config.RS485_PORT,
             baudrate=config.RS485_BAUD,
             bytesize=8,
@@ -39,9 +51,24 @@ class SoilSensor:
             timeout=config.RS485_TIMEOUT,
         )
 
+    def _reset_client(self) -> None:
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        self.client = self._new_client()
+
     def connect(self) -> None:
-        if not self.client.connect():
-            raise SensorError(f"cannot open {config.RS485_PORT}")
+        try:
+            connected = self.client.connect()
+        except Exception as exc:
+            self._reset_client()
+            raise SensorCommunicationError(
+                f"cannot open {config.RS485_PORT}: {exc}"
+            ) from exc
+        if not connected:
+            self._reset_client()
+            raise SensorCommunicationError(f"cannot open {config.RS485_PORT}")
 
     def close(self) -> None:
         self.client.close()
@@ -52,10 +79,38 @@ class SoilSensor:
             if config.RS485_FUNC == "holding"
             else self.client.read_input_registers
         )
-        result = reader(address, count=1, slave=config.RS485_SLAVE)
-        if result.isError():
-            raise SensorError(f"modbus error reading register 0x{address:04X}: {result}")
-        return result.registers[0]
+        try:
+            # PyModbus 3.10 renamed ``slave`` to ``device_id``. Prefer the
+            # current API used on the Pi, but retain compatibility with the
+            # older release used by some development machines.
+            try:
+                result = reader(
+                    address, count=1, device_id=config.RS485_SLAVE
+                )
+            except TypeError as exc:
+                if "device_id" not in str(exc):
+                    raise
+                result = reader(
+                    address, count=1, slave=config.RS485_SLAVE
+                )
+        except Exception as exc:
+            self._reset_client()
+            raise SensorCommunicationError(
+                f"communication failure reading register 0x{address:04X}: {exc}"
+            ) from exc
+
+        if result is None or result.isError():
+            self._reset_client()
+            raise SensorCommunicationError(
+                f"modbus timeout/error reading register 0x{address:04X}: {result}"
+            )
+        try:
+            return result.registers[0]
+        except (AttributeError, IndexError) as exc:
+            self._reset_client()
+            raise SensorCommunicationError(
+                f"malformed Modbus response for register 0x{address:04X}"
+            ) from exc
 
     def read_all(self) -> dict:
         """Returns {sensor_type: value} for every configured register.
@@ -75,7 +130,7 @@ class SoilSensor:
 
             low, high = config.SENSOR_RANGES.get(name, (float("-inf"), float("inf")))
             if not (low <= value <= high):
-                raise SensorError(
+                raise SensorDataError(
                     f"{name} read {value} (raw {raw}) outside plausible range "
                     f"{low}..{high} -- check the register map with tools/sensor_scan.py"
                 )

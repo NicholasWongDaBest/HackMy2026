@@ -1,0 +1,15 @@
+{% extends 'dashboard.html' %}
+{% block page %}
+{{ self.system_status() }}
+{{ self.metrics() }}
+{{ self.ribbon() }}
+{{ self.alerts() }}
+{{ self.sensors() }}
+{{ self.pump_status() }}
+{{ self.override_status() }}
+{{ self.decision() }}
+{{ self.summary() }}
+{{ self.audit() }}
+{{ self.history() }}
+{{ self.rejections_log() }}
+{% endblock %}
