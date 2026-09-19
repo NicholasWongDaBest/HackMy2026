@@ -92,8 +92,20 @@ def handle_broadcast(raw: bytes) -> None:
         log.info("broadcast sensor reading accepted")
 
 
+def _is_ack_payload(raw: bytes) -> bool:
+    """True for JSON we (or a peer) published as an ACK on a shared topic."""
+    try:
+        peek = json.loads(raw)
+        return isinstance(peek, dict) and peek.get("ack") is True
+    except (ValueError, TypeError):
+        return False
+
+
 def handle_test(client, raw: bytes) -> None:
-    data = validation.parse_json(raw) if raw.strip().startswith(b"{") else {}
+    # ACK is published on the same TOPIC_TEST we subscribe to -- ignore it
+    # or we echo-loop (same bug as Challenge3).
+    if _is_ack_payload(raw):
+        return
     log.info("test message: %s", raw[:120])
     client.publish(
         config.TOPIC_TEST,
@@ -107,7 +119,13 @@ def handle_challenge3(client, raw: bytes) -> None:
 
     We ACK immediately, record the event locally, and leave irrigation /
     logging / dashboard alone -- they never needed the network.
+
+    ACKs are published on the same topic, so ignore our own (and other)
+    ack payloads or we echo-loop forever.
     """
+    if _is_ack_payload(raw):
+        return
+
     parsed = validation.parse_challenge3_payload(raw)
     event_type = parsed["type"]
     message = parsed["message"]
@@ -131,7 +149,7 @@ def handle_challenge3(client, raw: bytes) -> None:
         "team": config.TEAM_NAME,
         "challenge": "challenge3",
         "ack": True,
-        "type": event_type,
+        "type": "ack",
         "edge_mode": True,
         "node": socket.gethostname(),
         "ts": time.time(),
