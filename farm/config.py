@@ -137,3 +137,21 @@ SENSOR_RANGES.update({
 
 # Central's table, discovered by inspecting the live schema.
 CENTRAL_TABLE = os.getenv("CENTRAL_TABLE", "Sensor_data_team10")
+
+# How often the Pi re-sends PUMP_ON while irrigating. Must be well under
+# the board's PUMP_MAX_RUN_MS (10s) or the relay drops out mid-run.
+PUMP_REFRESH_S = float(os.getenv("PUMP_REFRESH_S", "4.0"))
+
+# ---- Irrigation trigger: EC (electrical conductivity, uS/cm) -----------
+# Setup.pdf's own worked example: "EC low trigger water pump on". The
+# RS485 probe reads 0 in open air and climbs once the medium conducts.
+# Equal values mean no dead band: EC 0 -> pump on, anything at or above
+# EC_OFF_ABOVE -> pump off. Widen EC_OFF_ABOVE if you ever see chatter.
+EC_ON_BELOW  = float(os.getenv("EC_ON_BELOW", "1.0"))
+EC_OFF_ABOVE = float(os.getenv("EC_OFF_ABOVE", "1.0"))
+
+# How often the loop reads the probe and re-decides. Small so the pump
+# reacts in seconds. This is sensing, not logging -- POLL_INTERVAL_S above
+# still governs how often a row is written, which is what the brief's
+# "data polling every 1 minute" requirement is about.
+SENSE_INTERVAL_S = int(os.getenv("SENSE_INTERVAL_S", "5"))
